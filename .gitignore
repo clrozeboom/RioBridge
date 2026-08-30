@@ -1,0 +1,21 @@
+# Gradle / Java
+build/
+bin/
+.gradle/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.settings/
+.classpath
+.project
+
+# WPILib
+.wpilib/
+ctre_sim/
+logs/
+simgui*.json
+networktables.json*
