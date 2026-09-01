@@ -111,6 +111,9 @@ exactly what "builds and tests pass" does and doesn't cover.
 
 ## To verify before running on hardware
 
+Step-by-step procedures for all of these, including runnable diagnostics for items 1, 3 and 4,
+are in [docs/hardware-verification.md](docs/hardware-verification.md).
+
 1. `CANStreamMessage.timestamp` units — **confirmed genuinely ambiguous**, not just a concern:
    the field comment on the real 2027.0.0-alpha-7 source says milliseconds/`CLOCK_MONOTONIC`,
    `setStreamData`'s parameter javadoc on the *same class* says nanoseconds. `core-integration/`

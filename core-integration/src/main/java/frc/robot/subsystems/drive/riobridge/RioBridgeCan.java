@@ -24,6 +24,7 @@ public class RioBridgeCan implements AutoCloseable {
   private final int sessionHandle;
   private final CANStreamMessage[] scratch;
   private final RioBridgeCanDemux demux = new RioBridgeCanDemux();
+  private int overflowCount = 0;
 
   public RioBridgeCan(CANPort bus, int maxMessagesPerPoll) {
     sessionHandle =
@@ -52,10 +53,22 @@ public class RioBridgeCan implements AutoCloseable {
       // gap between two attitude timestamps). Demux what we did get rather than discarding it.
       received = overflow.getMessages();
       messagesRead = overflow.getMessagesRead();
+      overflowCount++;
     }
     for (int i = 0; i < messagesRead; i++) {
       demux.accept(received[i]);
     }
+  }
+
+  /**
+   * How many times {@link #poll()} has hit {@link CANStreamOverflowException} -- i.e. this
+   * session's buffer filled between two polls and at least one frame was dropped before being
+   * read. Should stay at 0 in normal operation; a nonzero, growing count is the direct answer to
+   * whether the shared SPI master (README's "to verify" item 3) is keeping up. See
+   * docs/hardware-verification.md.
+   */
+  public int overflowCount() {
+    return overflowCount;
   }
 
   public StatusFrame latestStatus() {

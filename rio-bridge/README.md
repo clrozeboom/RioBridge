@@ -17,6 +17,9 @@ is build/run mechanics and what's verified.
   a one-method-per-field interface so `Robot` is testable with a fake, independent of the vendor
   jar (`RobotTest`), as well as with the real one (`RobotRealNavxTest`).
 - `vendordeps/Studica.json` -- the navX2 vendordep.
+- `src/main/java/frc/robot/diagnostics/EncoderChannelDiagnostic.java` -- a bench tool for root
+  README "to verify" item 4 (are the encoders really on onboard channels 0-3, none on MXP?), not
+  part of the normal build's `Robot`. See [docs/hardware-verification.md](../docs/hardware-verification.md).
 
 ## Building
 
@@ -36,7 +39,7 @@ Standard WPILib project -- open with the WPILib VS Code extension, or:
 
 Every file here was compiled and unit tested against the real **2026.2.2 WPILib jars** (via
 GradleRIO 2026.2.1) and the real **`com.studica.frc:Studica-java:2026.0.0`** navX vendor jar.
-`./gradlew test` passes: 12 tests --
+`./gradlew test` passes: 13 tests --
 
 - `CanFramesTest` -- the wire format, pack/unpack round trips.
 - `RobotTest` -- `Robot.robotPeriodic()` under the desktop HAL sim, with a fake `AttitudeSource`
@@ -46,6 +49,8 @@ GradleRIO 2026.2.1) and the real **`com.studica.frc:Studica-java:2026.0.0`** nav
   (`Instantiating NavX on roboRIO MXP Port` ... `NavX: Connected.`), confirming
   `NavXComType.kMXP_SPI` really does mean "MXP" to the real driver, not just to this code's own
   assumption about it.
+- `EncoderChannelDiagnosticTest` -- constructs all 8 analog channels (onboard + MXP) under the
+  desktop HAL sim and runs its periodic loop repeatedly.
 
 Not verified, because nothing in this sandbox could exercise it: the actual sensor hardware, the
 actual CAN bus, and the roboRIO cross-compile/deploy step (`./gradlew test` compiles for desktop;
