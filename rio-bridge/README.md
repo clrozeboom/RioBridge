@@ -14,8 +14,9 @@ is build/run mechanics and what's verified.
 - `src/main/java/frc/robot/Robot.java` -- the `TimedRobot`: reads sensors and sends every frame
   explicitly each loop (ADR-0004), never `writePacketRepeating`.
 - `src/main/java/frc/robot/AttitudeSource.java` / `NavxAttitudeSource.java` -- the navX is behind
-  a one-method-per-field interface so `Robot` is testable without the vendor jar. See "What's not
-  verified" below.
+  a one-method-per-field interface so `Robot` is testable with a fake, independent of the vendor
+  jar (`RobotTest`), as well as with the real one (`RobotRealNavxTest`).
+- `vendordeps/Studica.json` -- the navX2 vendordep.
 
 ## Building
 
@@ -24,25 +25,28 @@ Standard WPILib project -- open with the WPILib VS Code extension, or:
 ```
 ./gradlew test    # unit + HAL-sim tests
 ./gradlew build    # full build, requires the roboRIO cross toolchain
-./gradlew deploy   # deploy to a roboRIO, requires vendordeps/ set up (see below)
+./gradlew deploy   # deploy to a roboRIO
 ```
 
 **Before your first build:** set your real team number in `.wpilib/wpilib_preferences.json`
 (currently a `9999` placeholder -- and that file itself isn't tracked by this repo's
-`.gitignore`, so this step doesn't persist across a fresh clone) and add the navX vendordep, see
-`vendordeps/README.md`.
+`.gitignore`, so this step doesn't persist across a fresh clone).
 
-## What's verified and what isn't
+## What's verified
 
-Every file here except `NavxAttitudeSource.java` was compiled and unit tested against the real
-**2026.2.2 WPILib jars** (via GradleRIO 2026.2.1) while writing this, including a HAL-simulation
-test that constructs `Robot` and calls `robotPeriodic()` repeatedly. `./gradlew test` passes: 11
-tests, `CanFramesTest` (wire format) and `RobotTest` (sensor/CAN wiring under HAL sim).
+Every file here was compiled and unit tested against the real **2026.2.2 WPILib jars** (via
+GradleRIO 2026.2.1) and the real **`com.studica.frc:Studica-java:2026.0.0`** navX vendor jar.
+`./gradlew test` passes: 12 tests --
 
-`NavxAttitudeSource.java` -- the only file touching `com.studica.frc.AHRS` -- could not be
-build-verified: its vendordep JSON lives on Studica's own Maven host, and this repo doesn't have
-a confirmed URL for the 2026 release (see `vendordeps/README.md`). Everything in it follows the
-navX API that's been stable across every navX generation (`getYaw()`/`getPitch()`/`getRoll()`/
-`getRate()`/`isConnected()`), but the exact `NavXComType` enum constant for "navX2 on the MXP SPI
-port" is a documented assumption, not a confirmed one -- see the TODO comment at the top of that
-file.
+- `CanFramesTest` -- the wire format, pack/unpack round trips.
+- `RobotTest` -- `Robot.robotPeriodic()` under the desktop HAL sim, with a fake `AttitudeSource`
+  so both the navX-connected and navX-disconnected paths run.
+- `RobotRealNavxTest` -- the public `Robot()` constructor, i.e. the real `NavxAttitudeSource` and
+  a real `AHRS`, also under the desktop HAL sim. It logs a real navX sim connection sequence
+  (`Instantiating NavX on roboRIO MXP Port` ... `NavX: Connected.`), confirming
+  `NavXComType.kMXP_SPI` really does mean "MXP" to the real driver, not just to this code's own
+  assumption about it.
+
+Not verified, because nothing in this sandbox could exercise it: the actual sensor hardware, the
+actual CAN bus, and the roboRIO cross-compile/deploy step (`./gradlew test` compiles for desktop;
+`./gradlew build`/`deploy` additionally need the athena toolchain, which wasn't fetched here).

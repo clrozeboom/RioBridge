@@ -94,8 +94,7 @@ was deliberately left out on those grounds.
 
 - [rio-bridge/](rio-bridge/) — the roboRIO-side WPILib project: reads the sensors, sends the
   three frames explicitly each loop. Builds and its tests pass against the real 2026.2.2 WPILib
-  jars; the one file touching the navX vendor library is the one thing in it that couldn't be
-  build-verified here — see `rio-bridge/README.md`.
+  jars and the real navX vendor jar (`vendordeps/Studica.json`) — see `rio-bridge/README.md`.
 - [core-integration/](core-integration/) — drop-in files for the Core's project: the CAN stream
   session, frame demux, and a `GyroIO` implementation. Builds and its tests pass against the real
   2027.0.0-alpha-7 `org.wpilib` jars — see `core-integration/README.md` for what that resolved
@@ -126,5 +125,8 @@ exactly what "builds and tests pass" does and doesn't cover.
    resolvable from frcmaven as of this writing (2027 alphas get overwritten there); alpha-7 is
    current, and is what `core-integration/` builds against. Confirm your clone's actual pinned
    versions still build together.
-6. `NavxAttitudeSource`'s exact navX2 constructor call (`NavXComType.kMXP_SPI`) against whichever
-   navX vendordep version you install — see `rio-bridge/vendordeps/README.md`.
+6. ~~`NavxAttitudeSource`'s exact navX2 constructor call (`NavXComType.kMXP_SPI`) against whichever
+   navX vendordep version you install~~ — **resolved**: `vendordeps/Studica.json` pins
+   `com.studica.frc:Studica-java:2026.0.0`, and `NavXComType.kMXP_SPI` is confirmed correct
+   against its real source, including a HAL-sim run that logs a real navX MXP connection
+   sequence. See `rio-bridge/README.md`.

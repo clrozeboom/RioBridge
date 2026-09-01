@@ -7,20 +7,13 @@ import com.studica.frc.AHRS.NavXComType;
  * Wraps the navX2 on the MXP port. This is 2026 WPILib's unmodified navX vendor library (ADR-0001)
  * -- RioBridge only reads it and republishes over CAN, never patches it.
  *
- * <p><b>Not build-verified.</b> Every other file under {@code rio-bridge/} was compiled and
- * tested against the real 2026.2.2 WPILib jars while writing this project; this one file could
- * not be, because the navX vendordep JSON lives on Studica's own Maven host and its exact URL
- * for the 2026 season wasn't reachable while writing this code (see rio-bridge/README.md). Add
- * the real vendordep through the WPILib VS Code extension's "Manage Vendor Libraries" -&gt;
- * "Install new library (online)" before the first build, then confirm the two things below
- * against its javadoc:
- *
- * <ul>
- *   <li>{@code NavXComType.kMXP_SPI} is the enum constant for "navX on the MXP SPI bus" -- the
- *       navX2's connection here.
- *   <li>{@code getRate()} returns yaw rate in degrees/second (true for every navX generation to
- *       date, since it implements WPILib's {@code Gyro} interface).
- * </ul>
+ * <p>Verified against the real {@code com.studica.frc:Studica-java:2026.0.0} sources (once the
+ * vendordep landed in {@code vendordeps/Studica.json}): {@code NavXComType.kMXP_SPI} is exactly
+ * the constant for "navX on the MXP SPI bus", and {@code getRate()}'s javadoc confirms yaw rate
+ * in degrees/second. {@code getYaw()}/{@code getPitch()}/{@code getRoll()} return {@code float}
+ * on the real API (widened to {@code double} here, not narrowed -- no precision lost). This class
+ * also runs under the desktop HAL sim in {@code RobotRealNavxTest}, which constructs a real
+ * {@code AHRS} on port {@code kMXP_SPI} and confirms it connects.
  */
 public class NavxAttitudeSource implements AttitudeSource {
   private final AHRS ahrs = new AHRS(NavXComType.kMXP_SPI);
