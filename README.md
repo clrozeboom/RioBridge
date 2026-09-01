@@ -3,7 +3,7 @@
 Republish a 2026 roboRIO's sensor interfaces onto a 2027 SystemCore CAN bus, so that sensors and
 vendor libraries with no 2027 support stay readable from 2027 robot code.
 
-**Status: design complete, implementation not started.**
+**Status: implemented, not yet run against real hardware.** See [Implementation](#implementation).
 
 ## Why
 
@@ -90,18 +90,41 @@ The reliability bar is "good enough to test things" — this is an offseason rob
 played in a match. See [ADR-0005](docs/adr/0005-offseason-reliability-bar.md), which records what
 was deliberately left out on those grounds.
 
+## Implementation
+
+- [rio-bridge/](rio-bridge/) — the roboRIO-side WPILib project: reads the sensors, sends the
+  three frames explicitly each loop. Builds and its tests pass against the real 2026.2.2 WPILib
+  jars; the one file touching the navX vendor library is the one thing in it that couldn't be
+  build-verified here — see `rio-bridge/README.md`.
+- [core-integration/](core-integration/) — drop-in files for the Core's project: the CAN stream
+  session, frame demux, and a `GyroIO` implementation. Builds and its tests pass against the real
+  2027.0.0-alpha-7 `org.wpilib` jars — see `core-integration/README.md` for what that resolved
+  about the "to verify" list below, and what's still open.
+
+Neither has run against real hardware or a real CAN bus yet — see each directory's README for
+exactly what "builds and tests pass" does and doesn't cover.
+
 ## Documents
 
 - [CONTEXT.md](CONTEXT.md) — glossary. "RioBridge" and "Core" are the two ends; "RIO heartbeat"
   and "Status frame" are deliberately different things.
 - [docs/adr/](docs/adr/) — the decisions and why.
 
-## To verify before writing protocol code
+## To verify before running on hardware
 
-1. `CANStreamMessage.timestamp` units — the field comment says milliseconds/`CLOCK_MONOTONIC`,
-   the setter's javadoc says nanoseconds. Print raw values and find out.
+1. `CANStreamMessage.timestamp` units — **confirmed genuinely ambiguous**, not just a concern:
+   the field comment on the real 2027.0.0-alpha-7 source says milliseconds/`CLOCK_MONOTONIC`,
+   `setStreamData`'s parameter javadoc on the *same class* says nanoseconds. `core-integration/`
+   follows the field comment; print a raw value against a known interval and confirm before
+   trusting the 100 ms gyro staleness threshold.
 2. HAT channel 1 termination jumper is actually set.
 3. MCP2515 RX headroom at 100 Hz with bus 0 loaded — both HAT channels share the Pi's SPI master,
    so watch `getCANStatus` counters on both buses.
-4. All four encoders are on onboard analog channels, none on MXP analog.
-5. AdvantageKit alpha-4 and WPILib alpha-6 build together on the clone.
+4. All four encoders are on onboard analog channels, none on MXP analog. `rio-bridge/`'s encoder
+   channel list has a `TODO` at this exact point.
+5. AdvantageKit alpha-4 and WPILib alpha-6 build together on the clone — alpha-6 is no longer
+   resolvable from frcmaven as of this writing (2027 alphas get overwritten there); alpha-7 is
+   current, and is what `core-integration/` builds against. Confirm your clone's actual pinned
+   versions still build together.
+6. `NavxAttitudeSource`'s exact navX2 constructor call (`NavXComType.kMXP_SPI`) against whichever
+   navX vendordep version you install — see `rio-bridge/vendordeps/README.md`.

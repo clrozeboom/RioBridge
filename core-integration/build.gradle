@@ -1,0 +1,46 @@
+// Not a robot project -- these are drop-in files for whatever SystemCore/AdvantageKit project
+// consumes RioBridge frames (see README.md's "Core" and core-integration/README.md). This build
+// exists only to compile and test them against real 2027 alpha WPILib jars; it has no GradleRIO
+// plugin, no deploy target, and produces nothing meant to be run on its own.
+plugins {
+    id "java-library"
+}
+
+repositories {
+    mavenCentral()
+    maven { url = "https://frcmaven.wpi.edu/artifactory/release" }
+}
+
+java {
+    // The 2027 alpha org.wpilib jars are compiled for Java 25 (class file major version 69) --
+    // newer than this repo's rio-bridge/ (2026 WPILib, Java 17). A toolchain keeps that pinned
+    // here without forcing Gradle's own daemon JVM to 25 as well.
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// README.md's Core hardware is WPILib 2027.0.0-alpha-6; alpha-7 is what's on frcmaven as of this
+// writing (2027 alpha versions get overwritten there, so alpha-6 itself is no longer resolvable).
+// Match whatever your SystemCore project is actually pinned to.
+def wpilibVersion = "2027.0.0-alpha-7"
+
+dependencies {
+    implementation "org.wpilib.wpilibj:wpilibj-java:${wpilibVersion}"
+    implementation "org.wpilib.wpimath:wpimath-java:${wpilibVersion}"
+    implementation "org.wpilib.hal:hal-java:${wpilibVersion}"
+    implementation "org.wpilib.wpiutil:wpiutil-java:${wpilibVersion}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile) {
+    options.compilerArgs.add "-Xlint:unchecked"
+    options.encoding = "UTF-8"
+    options.deprecation = true
+}

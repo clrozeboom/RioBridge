@@ -1,0 +1,8 @@
+plugins {
+    // Lets Gradle download a matching JDK 25 toolchain (see build.gradle) if one isn't already
+    // installed where Gradle's default detection looks -- the 2027 alpha org.wpilib jars are
+    // compiled for Java 25, newer than most machines will have on PATH today.
+    id "org.gradle.toolchains.foojay-resolver-convention" version "0.8.0"
+}
+
+rootProject.name = "core-integration"
