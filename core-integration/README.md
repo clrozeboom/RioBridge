@@ -61,9 +61,12 @@ procedure, pass criteria, and how to read the output: [docs/hardware-verificatio
 ## What's verified
 
 Everything here compiles and its tests pass against the **real 2027.0.0-alpha-7 org.wpilib jars**
-(`org.wpilib.wpilibj`, `org.wpilib.wpimath`, `org.wpilib.hal`, `org.wpilib.wpiutil` -- the root
-README cites alpha-6; alpha-7 is what's resolvable from frcmaven as of this writing, since old
-2027 alphas get overwritten there rather than retained). `./gradlew test`: 21 tests --
+(`org.wpilib.wpilibj`, `org.wpilib.wpimath`, `org.wpilib.hal`, `org.wpilib.wpiutil`) -- the root
+README's stated Core hardware now matches (updated from alpha-6, which is no longer resolvable
+from frcmaven; 2027 alphas get overwritten there rather than retained). Not verified: whether
+AdvantageKit alpha-4 -- also cited in the root README, and presumably tested against alpha-6, not
+alpha-7 -- still builds against this newer WPILib; this directory doesn't depend on AdvantageKit
+at all, so that pairing was never exercised here. `./gradlew test`: 21 tests --
 `CanFramesTest` (wire format, shared with rio-bridge/), `RioBridgeCanDemuxTest` (frame demux,
 built from hand-constructed `CANStreamMessage`s), and `TimestampUnitsCheckTest` /
 `BusHealthMonitorTest` (the diagnostics' own classification logic).

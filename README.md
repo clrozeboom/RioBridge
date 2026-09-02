@@ -20,7 +20,8 @@ were considered and rejected.
 ## Hardware this was designed against
 
 - **Core** — Raspberry Pi 5 + dual-channel Waveshare CAN HAT (no-FD), running Limelight
-  SystemCore OS with WPILib `2027.0.0-alpha-6` and AdvantageKit `v27.0.0-alpha-4`. Built from
+  SystemCore OS with WPILib `2027.0.0-alpha-7` (updated from `alpha-6`, which is no longer
+  resolvable from frcmaven — see below) and AdvantageKit `v27.0.0-alpha-4`. Built from
   [BobcatRobotics/SystemCore-Clone](https://github.com/BobcatRobotics/SystemCore-Clone).
 - **RioBridge** — roboRIO with a navX2 on the MXP port and four analog absolute encoders.
 - **Robot** — swerve on REV SPARK MAX, PDH terminating CAN bus 0.
@@ -97,8 +98,9 @@ was deliberately left out on those grounds.
   jars and the real navX vendor jar (`vendordeps/Studica.json`) — see `rio-bridge/README.md`.
 - [core-integration/](core-integration/) — drop-in files for the Core's project: the CAN stream
   session, frame demux, and a `GyroIO` implementation. Builds and its tests pass against the real
-  2027.0.0-alpha-7 `org.wpilib` jars — see `core-integration/README.md` for what that resolved
-  about the "to verify" list below, and what's still open.
+  `2027.0.0-alpha-7` `org.wpilib` jars, now this repo's stated WPILib target (updated from
+  `alpha-6`) — see `core-integration/README.md` for what that resolved about the "to verify" list
+  below, and what's still open.
 
 Neither has run against real hardware or a real CAN bus yet — see each directory's README for
 exactly what "builds and tests pass" does and doesn't cover.
@@ -124,10 +126,15 @@ are in [docs/hardware-verification.md](docs/hardware-verification.md).
    so watch `getCANStatus` counters on both buses.
 4. All four encoders are on onboard analog channels, none on MXP analog. `rio-bridge/`'s encoder
    channel list has a `TODO` at this exact point.
-5. AdvantageKit alpha-4 and WPILib alpha-6 build together on the clone — alpha-6 is no longer
-   resolvable from frcmaven as of this writing (2027 alphas get overwritten there); alpha-7 is
-   current, and is what `core-integration/` builds against. Confirm your clone's actual pinned
-   versions still build together.
+5. AdvantageKit alpha-4 builds against WPILib **alpha-7** on the clone — this is now a version
+   *bump* to verify, not just a build-together check: alpha-6 (what AdvantageKit alpha-4 was
+   presumably built and tested against) is no longer resolvable from frcmaven (2027 alphas get
+   overwritten there), so `core-integration/` was written and build-verified against alpha-7
+   instead, and the root README's stated Core hardware was updated to match. Nothing here checked
+   whether AdvantageKit alpha-4 itself is compatible with WPILib alpha-7 — `core-integration/`
+   doesn't depend on AdvantageKit at all, so that pairing was never exercised. Confirm on the
+   actual clone; if alpha-4 doesn't build against alpha-7, check for a newer AdvantageKit alpha
+   before assuming the RioBridge-side code is at fault.
 6. ~~`NavxAttitudeSource`'s exact navX2 constructor call (`NavXComType.kMXP_SPI`) against whichever
    navX vendordep version you install~~ — **resolved**: `vendordeps/Studica.json` pins
    `com.studica.frc:Studica-java:2026.0.0`, and `NavXComType.kMXP_SPI` is confirmed correct

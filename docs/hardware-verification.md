@@ -167,14 +167,16 @@ stay flat/noisy throughout.
 **When done:** revert `Main.java` to `RobotBase.startRobot(Robot::new)` and redeploy the real
 `Robot` before leaving the bench.
 
-## 5. AdvantageKit alpha-4 / WPILib alpha-6 build compatibility
+## 5. AdvantageKit alpha-4 / WPILib alpha-7 build compatibility
 
 This is an external-repo check -- [BobcatRobotics/SystemCore-Clone](https://github.com/BobcatRobotics/SystemCore-Clone),
-not this repo -- so there's no script here for it. Also worth knowing going in:
-`core-integration/` in *this* repo had to move to alpha-7 and a Java 25 toolchain, because
-alpha-6 was no longer resolvable from frcmaven by the time it was built (old 2027 alphas get
-overwritten there rather than retained). Confirm what your actual clone has pinned rather than
-assuming alpha-6 is even still available to it.
+not this repo -- so there's no script here for it. Also worth knowing going in: this is now a
+version *bump* to verify, not just a build-together check. The root README's stated WPILib target
+moved from alpha-6 to alpha-7 (alpha-6 is no longer resolvable from frcmaven -- old 2027 alphas
+get overwritten there rather than retained), and `core-integration/` in this repo was updated and
+build-verified against alpha-7 accordingly. That update never touched AdvantageKit -- this repo
+doesn't depend on it at all -- so whether AdvantageKit alpha-4 (presumably built and tested
+against alpha-6) still builds against alpha-7 is exactly the open question here, not a formality.
 
 **Steps:**
 
@@ -182,12 +184,13 @@ assuming alpha-6 is even still available to it.
 2. Check what's actually pinned: the WPILib version in its `build.gradle` (the
    `edu.wpi.first.GradleRIO`/equivalent plugin version, or a `wpilibVersion` property) and the
    AdvantageKit version in its `vendordeps/*.json`.
-3. `./gradlew build` (or your project's equivalent). If the versions you found in step 2 aren't
-   what the README expects (alpha-4 AdvantageKit / alpha-6 WPILib), that's already your answer --
-   note the actual versions instead.
+3. Bump the WPILib version to `2027.0.0-alpha-7` if it isn't already, then `./gradlew build` (or
+   your project's equivalent).
 4. If it fails, the error is almost always a version mismatch between AdvantageKit and WPILib
    (AdvantageKit pins a specific WPILib version range per release) -- check AdvantageKit's release
-   notes for which WPILib alpha it expects, and bump whichever side is behind.
+   notes for which WPILib alpha it expects. If alpha-4 doesn't support alpha-7 yet, look for a
+   newer AdvantageKit alpha before assuming anything in the RioBridge-side code is at fault --
+   this repo's own code has no AdvantageKit dependency to be wrong about.
 
 If you'd rather this session did this check directly: it would need `BobcatRobotics/SystemCore-Clone`
 attached to this session first (it isn't currently in scope), since GitHub access here is
