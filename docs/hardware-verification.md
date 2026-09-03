@@ -73,9 +73,20 @@ item 3's results if you check this after, not before.
 3. Compare against expected values:
    - **~60 Ohms** -- both terminators present (roboRIO's internal 120 Ohm + HAT channel 1's 120
      Ohm, in parallel). This is the pass case.
-   - **~120 Ohms** -- only one terminator is in the circuit. Since the roboRIO's is internal and
-     can't be accidentally removed, this means the HAT channel 1 jumper isn't set (or the HAT
-     doesn't terminate that channel the way assumed). Set it and re-measure.
+   - **~120 Ohms, and the same ~120 Ohms at both ends** -- only one terminator is in the circuit.
+     Since CAN_H and CAN_L are a single shared node pair on a continuous bus, one active
+     terminator reads identically from either end -- getting 120 Ohms at both ends is expected
+     for this case, not a sign the two readings disagree with each other. Since the roboRIO's
+     terminator is internal and can't be accidentally removed, this means the HAT channel 1
+     jumper isn't set (check the HAT's documentation/silkscreen for that channel's termination
+     jumper). Set it and re-measure; expect ~60 Ohms.
+     - **Still ~120 Ohms after setting the jumper?** That points away from termination and
+       toward a wiring problem instead: the bus isn't actually electrically continuous between
+       the two ends, so each end is only seeing its own local terminator, not the other one
+       through the cable. Distinguish this with a continuity check, not a resistance check: cable
+       still connected, multimeter in continuity mode, RioBridge's CAN_H pin to the Core's CAN_H
+       pin (expect a beep / near-0 Ohms), then CAN_L to CAN_L. Whichever doesn't show continuity
+       is a bad crimp, loose connector, or broken wire -- not the jumper.
    - **Very high / open** -- a broken connection somewhere in the cable or connector, not a
      termination problem. Check continuity of CAN_H and CAN_L individually.
    - **Near 0 / short** -- CAN_H and CAN_L are shorted together somewhere. Do not power this bus
