@@ -121,7 +121,10 @@ are in [docs/hardware-verification.md](docs/hardware-verification.md).
    `setStreamData`'s parameter javadoc on the *same class* says nanoseconds. `core-integration/`
    follows the field comment; print a raw value against a known interval and confirm before
    trusting the 100 ms gyro staleness threshold.
-2. HAT channel 1 termination jumper is actually set.
+2. ~~HAT channel 1 termination jumper is actually set~~ — **resolved**: measured ~60 Ohms across
+   CAN_H/CAN_L with the RioBridge and Core's CAN_S1 connected end-to-end, confirming both the
+   roboRIO's internal terminator and the HAT channel 1 terminator are present and in circuit
+   together. See [docs/hardware-verification.md](docs/hardware-verification.md) item 2.
 3. MCP2515 RX headroom at 100 Hz with bus 0 loaded — both HAT channels share the Pi's SPI master,
    so watch `getCANStatus` counters on both buses.
 4. All four encoders are on onboard analog channels, none on MXP analog. `rio-bridge/`'s encoder
