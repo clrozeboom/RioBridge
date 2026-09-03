@@ -64,31 +64,40 @@ missing or extra terminator degrades signal integrity in a way that often *doesn
 outright failures at low traffic, just increasing bit errors under load -- which would confound
 item 3's results if you check this after, not before.
 
+There are two stages here, and they answer different questions -- don't stop at the first one.
+
 **Steps:**
 
 1. Power off the roboRIO, the Core, and anything else on this bus.
-2. With the CAN cable still connected end-to-end (RioBridge to HAT channel 1), measure DC
-   resistance between CAN_H and CAN_L with a multimeter, at either end of the bus -- doesn't
-   matter which, since you're measuring the two terminators in parallel through the cable.
-3. Compare against expected values:
-   - **~60 Ohms** -- both terminators present (roboRIO's internal 120 Ohm + HAT channel 1's 120
-     Ohm, in parallel). This is the pass case.
-   - **~120 Ohms, and the same ~120 Ohms at both ends** -- only one terminator is in the circuit.
-     Since CAN_H and CAN_L are a single shared node pair on a continuous bus, one active
-     terminator reads identically from either end -- getting 120 Ohms at both ends is expected
-     for this case, not a sign the two readings disagree with each other. Since the roboRIO's
-     terminator is internal and can't be accidentally removed, this means the HAT channel 1
-     jumper isn't set (check the HAT's documentation/silkscreen for that channel's termination
-     jumper). Set it and re-measure; expect ~60 Ohms.
-     - **Still ~120 Ohms after setting the jumper?** That points away from termination and
-       toward a wiring problem instead: the bus isn't actually electrically continuous between
-       the two ends, so each end is only seeing its own local terminator, not the other one
-       through the cable. Distinguish this with a continuity check, not a resistance check: cable
-       still connected, multimeter in continuity mode, RioBridge's CAN_H pin to the Core's CAN_H
-       pin (expect a beep / near-0 Ohms), then CAN_L to CAN_L. Whichever doesn't show continuity
-       is a bad crimp, loose connector, or broken wire -- not the jumper.
-   - **Very high / open** -- a broken connection somewhere in the cable or connector, not a
-     termination problem. Check continuity of CAN_H and CAN_L individually.
+2. **Stage A -- isolated sanity check (optional, but useful for isolating a fault).** With the
+   two ends *not* connected to each other, measure DC resistance between CAN_H and CAN_L at each
+   connector on its own:
+   - RioBridge (roboRIO) alone: expect **~120 Ohms**. This is the roboRIO's fixed internal
+     terminator, which is always present by design -- reading 120 Ohms here just confirms that,
+     it isn't really testing anything variable.
+   - Core's CAN_S1 (HAT channel 1) alone: **~120 Ohms** means that channel's termination jumper
+     *is* set (its own local terminator is present and correctly valued -- good news). **Open /
+     very high** means the jumper isn't set.
+
+   Getting ~120 Ohms at both ends in this stage is a *pass* for Stage A, not the "only one
+   terminator" failure described below -- that failure only applies to a joined-bus measurement
+   (Stage B). Measured in isolation, 120 Ohms at each end separately is two independent
+   confirmations that each side's terminator is present, which is exactly what you want to see
+   before moving on.
+3. **Stage B -- the actual test.** Connect the CAN cable end-to-end (RioBridge to HAT channel 1),
+   then measure once, at either end -- it now matters that they're joined, which is what makes
+   "either end" give the same reading (CAN_H and CAN_L become one shared node pair across a
+   continuous bus, so resistance measured anywhere on it is identical). Compare against:
+   - **~60 Ohms** -- both terminators present *and* in circuit together (120 Ohm parallel 120
+     Ohm). This is the pass case for item 2.
+   - **~120 Ohms** -- only one terminator is actually in the joined circuit, even if Stage A
+     showed both present individually. That points to a continuity problem in the cable or
+     connector, not a missing jumper (you already confirmed the jumper's there in Stage A) --
+     check continuity (not resistance) between the RioBridge's CAN_H pin and the Core's CAN_H pin
+     (expect a beep / near-0 Ohms), then CAN_L to CAN_L. Whichever doesn't show continuity is a
+     bad crimp, loose connector, or broken wire.
+   - **Very high / open** -- a broken connection somewhere in the cable or connector. Same
+     continuity check as above.
    - **Near 0 / short** -- CAN_H and CAN_L are shorted together somewhere. Do not power this bus
      on until that's fixed.
 
