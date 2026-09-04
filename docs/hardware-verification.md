@@ -187,31 +187,44 @@ stay flat/noisy throughout.
 **When done:** revert `Main.java` to `RobotBase.startRobot(Robot::new)` and redeploy the real
 `Robot` before leaving the bench.
 
-## 5. AdvantageKit alpha-4 / WPILib alpha-7 build compatibility
+## 5. Core toolchain / vendor library build compatibility at alpha-7
 
-This is an external-repo check -- [BobcatRobotics/SystemCore-Clone](https://github.com/BobcatRobotics/SystemCore-Clone),
-not this repo -- so there's no script here for it. Also worth knowing going in: this is now a
-version *bump* to verify, not just a build-together check. The root README's stated WPILib target
-moved from alpha-6 to alpha-7 (alpha-6 is no longer resolvable from frcmaven -- old 2027 alphas
-get overwritten there rather than retained), and `core-integration/` in this repo was updated and
-build-verified against alpha-7 accordingly. That update never touched AdvantageKit -- this repo
-doesn't depend on it at all -- so whether AdvantageKit alpha-4 (presumably built and tested
-against alpha-6) still builds against alpha-7 is exactly the open question here, not a formality.
+**Updated after actually cloning the real Core project.** [`clrozeboom/BobCat-SystemCore-Clone`](https://github.com/clrozeboom/BobCat-SystemCore-Clone)
+turned out not to contain AdvantageKit or REV SPARK MAX at all -- it's mostly a Raspberry Pi
+OS/CAN-HAT setup repo, with two example robot projects under `project_examples/ctre/` built on
+CTRE Phoenix6 and a coroutine-based `commandsv3-java` command framework (`org.wpilib.command3`),
+both still pinned to WPILib `2027.0.0-alpha-6`. If your actual Core project's stack differs from
+this, treat this item's steps as a template and substitute your own vendor library and framework.
 
-**Steps:**
+`core-example-rev/` in this repo already did the empirical work for the REV side of this
+question: REVLib is in the same spot as CTRE (published at alpha-6, not alpha-7), and porting the
+CTRE-shaped example to alpha-7 surfaced five real API differences along the way (renamed/removed
+GradleRIO properties, `Mechanism` changing from a class to an interface, `RobotBase.startRobot`'s
+`Class<T>` overload being removed, `SendableChooser`/`SmartDashboard` disappearing outright) --
+see `core-example-rev/README.md`'s table before you hit the same ones. The one thing it could not
+get working is REVLib's native driver actually loading (a missing `libBackendDriver.so`
+dependency, confirmed to be REV's packaging gap, not this repo's) -- if you're checking Phoenix6
+instead, its native driver may or may not have the equivalent problem; that's what step 3 below
+actually tests.
 
-1. Clone (or open your existing checkout of) `BobcatRobotics/SystemCore-Clone`.
-2. Check what's actually pinned: the WPILib version in its `build.gradle` (the
-   `edu.wpi.first.GradleRIO`/equivalent plugin version, or a `wpilibVersion` property) and the
-   AdvantageKit version in its `vendordeps/*.json`.
-3. Bump the WPILib version to `2027.0.0-alpha-7` if it isn't already, then `./gradlew build` (or
-   your project's equivalent).
-4. If it fails, the error is almost always a version mismatch between AdvantageKit and WPILib
-   (AdvantageKit pins a specific WPILib version range per release) -- check AdvantageKit's release
-   notes for which WPILib alpha it expects. If alpha-4 doesn't support alpha-7 yet, look for a
-   newer AdvantageKit alpha before assuming anything in the RioBridge-side code is at fault --
-   this repo's own code has no AdvantageKit dependency to be wrong about.
+**Steps, for whatever vendor library and framework your Core project actually uses:**
 
-If you'd rather this session did this check directly: it would need `BobcatRobotics/SystemCore-Clone`
-attached to this session first (it isn't currently in scope), since GitHub access here is
-allowlisted per-repository.
+1. Open your Core project (or `clrozeboom/BobCat-SystemCore-Clone`'s `ctre-commands-v3` if you
+   have no other yet).
+2. Check what's actually pinned: the `org.wpilib.GradleRIO` plugin version in `build.gradle`, and
+   each vendor library's version in `vendordeps/*.json`.
+3. Bump the WPILib/GradleRIO version to `2027.0.0-alpha-7` (or whatever is current -- confirm on
+   frcmaven, since old 2027 alphas get overwritten there rather than retained) and try
+   `./gradlew build`. Expect real compile errors if your code touches anything in
+   `core-example-rev/README.md`'s table; fix those first so a subsequent failure is actually about
+   vendor library compatibility, not leftover alpha-6 API usage.
+4. If a vendor library's own classes fail to resolve or compile, check its release notes for
+   which WPILib alpha it expects -- look for a newer vendor release before assuming the RioBridge
+   integration code is at fault, since neither `core-integration/` nor `core-example-rev/` has any
+   dependency on AdvantageKit, CTRE, or REV to be wrong about (`core-example-rev/`'s REVLib
+   dependency is deliberately isolated to that one directory).
+5. If it compiles but a device's native driver won't construct at runtime (an
+   `ExceptionInInitializerError` wrapping a native-library load failure, same shape as
+   `core-example-rev/`'s), check the missing library's exact name with `readelf -d
+   path/to/libTheDriver.so | grep NEEDED` and search the vendor's Maven host for an artifact
+   providing it before concluding it's your build's fault.
