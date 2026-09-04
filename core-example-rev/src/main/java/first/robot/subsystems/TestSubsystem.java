@@ -11,15 +11,15 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkMaxConfig;
 import first.robot.Constants.TestSubsystemConstants;
-import org.wpilib.command3.*;
+import org.wpilib.command2.Command;
+import org.wpilib.command2.Commands;
+import org.wpilib.command2.SubsystemBase;
 
 /** REVLib equivalent of the CTRE example's {@code TestSubsystem} -- one SPARK MAX, spun open-loop
- *  in either direction. Exists to prove REVLib + WPILib 2027 alpha-7 + commandsv3-java actually
+ *  in either direction. Exists to prove REVLib + WPILib 2027 alpha-7 + commandsv2-java actually
  *  build and run together on this toolchain (see ../../../../../../../README.md), not to be a
  *  real drivetrain. */
-// Mechanism is an interface at alpha-7 (it was a class at whatever alpha the CTRE example this
-// was modeled on was written against -- confirmed by decompiling Mechanism.class here).
-public class TestSubsystem implements Mechanism {
+public class TestSubsystem extends SubsystemBase {
   private final SparkMax motor =
       new SparkMax(
           TestSubsystemConstants.MOTOR_BUS.value,
@@ -38,19 +38,16 @@ public class TestSubsystem implements Mechanism {
   }
 
   public Command runClockwise() {
-    // implicitly require `this`
-    return this.run(coro -> motor.setThrottle(TestSubsystemConstants.CLOCKWISE_OUTPUT))
-        .named("MotorSpinClockwise");
+    return Commands.run(() -> motor.setThrottle(TestSubsystemConstants.CLOCKWISE_OUTPUT), this);
   }
 
   public Command runCounterClockwise() {
-    // implicitly require `this`
-    return this.run(coro -> motor.setThrottle(TestSubsystemConstants.COUNTERCLOCKWISE_OUTPUT))
-        .named("MotorSpinCounterClockwise");
+    return Commands.run(
+        () -> motor.setThrottle(TestSubsystemConstants.COUNTERCLOCKWISE_OUTPUT), this);
   }
 
   public Command stopMotors() {
-    return this.run(coro -> stop()).named("StopMotor");
+    return Commands.run(this::stop, this);
   }
 
   public void stop() {

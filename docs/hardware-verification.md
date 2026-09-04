@@ -191,26 +191,28 @@ stay flat/noisy throughout.
 
 **Updated after actually cloning the real Core project.** [`clrozeboom/BobCat-SystemCore-Clone`](https://github.com/clrozeboom/BobCat-SystemCore-Clone)
 turned out not to contain AdvantageKit or REV SPARK MAX at all -- it's mostly a Raspberry Pi
-OS/CAN-HAT setup repo, with two example robot projects under `project_examples/ctre/` built on
-CTRE Phoenix6 and a coroutine-based `commandsv3-java` command framework (`org.wpilib.command3`),
-both still pinned to WPILib `2027.0.0-alpha-6`. If your actual Core project's stack differs from
-this, treat this item's steps as a template and substitute your own vendor library and framework.
+OS/CAN-HAT setup repo, with two example robot projects under `project_examples/ctre/` (one on
+`commandsv2-java`, one on the newer coroutine-based `commandsv3-java`), both built on CTRE
+Phoenix6 and both still pinned to WPILib `2027.0.0-alpha-6`. If your actual Core project's stack
+differs from this, treat this item's steps as a template and substitute your own vendor library
+and framework.
 
 `core-example-rev/` in this repo already did the empirical work for the REV side of this
 question: REVLib is in the same spot as CTRE (published at alpha-6, not alpha-7), and porting the
-CTRE-shaped example to alpha-7 surfaced five real API differences along the way (renamed/removed
-GradleRIO properties, `Mechanism` changing from a class to an interface, `RobotBase.startRobot`'s
-`Class<T>` overload being removed, `SendableChooser`/`SmartDashboard` disappearing outright) --
-see `core-example-rev/README.md`'s table before you hit the same ones. The one thing it could not
-get working is REVLib's native driver actually loading (a missing `libBackendDriver.so`
-dependency, confirmed to be REV's packaging gap, not this repo's) -- if you're checking Phoenix6
-instead, its native driver may or may not have the equivalent problem; that's what step 3 below
-actually tests.
+CTRE-shaped example to alpha-7 (tried against both `command2` and `command3`) surfaced real API
+differences along the way (renamed/removed GradleRIO properties, `RobotBase.startRobot`'s
+`Class<T>` overload being removed, `SendableChooser`/`SmartDashboard` disappearing outright, plus
+one `command3`-only change -- `Mechanism` going from a class to an interface) -- see
+`core-example-rev/README.md`'s table before you hit the same ones. The one thing it could not get
+working, on either command framework, is REVLib's native driver actually loading (a missing
+`libBackendDriver.so` dependency, confirmed to be REV's packaging gap, not this repo's) -- if
+you're checking Phoenix6 instead, its native driver may or may not have the equivalent problem;
+that's what step 3 below actually tests.
 
 **Steps, for whatever vendor library and framework your Core project actually uses:**
 
-1. Open your Core project (or `clrozeboom/BobCat-SystemCore-Clone`'s `ctre-commands-v3` if you
-   have no other yet).
+1. Open your Core project (or `clrozeboom/BobCat-SystemCore-Clone`'s `ctre-commands-v2`/
+   `ctre-commands-v3` if you have no other yet).
 2. Check what's actually pinned: the `org.wpilib.GradleRIO` plugin version in `build.gradle`, and
    each vendor library's version in `vendordeps/*.json`.
 3. Bump the WPILib/GradleRIO version to `2027.0.0-alpha-7` (or whatever is current -- confirm on

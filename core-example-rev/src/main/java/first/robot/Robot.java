@@ -4,8 +4,8 @@
 
 package first.robot;
 
-import org.wpilib.command3.Command;
-import org.wpilib.command3.Scheduler;
+import org.wpilib.command2.Command;
+import org.wpilib.command2.CommandScheduler;
 import org.wpilib.driverstation.DriverStation;
 import org.wpilib.framework.TimedRobot;
 import org.wpilib.system.DataLogManager;
@@ -50,7 +50,7 @@ public class Robot extends TimedRobot {
     // commands, running already-scheduled commands, removing finished or interrupted commands,
     // and running subsystem periodic() methods.  This must be called from the robot's periodic
     // block in order for anything in the Command-based framework to work.
-    Scheduler.getDefault().run();
+    CommandScheduler.getInstance().run();
   }
 
   /** This function is called once each time the robot enters Disabled mode. */
@@ -67,7 +67,7 @@ public class Robot extends TimedRobot {
 
     // schedule the autonomous command (example)
     if (autonomousCommand != null) {
-      Scheduler.getDefault().schedule(autonomousCommand);
+      CommandScheduler.getInstance().schedule(autonomousCommand);
     }
   }
 
@@ -82,7 +82,7 @@ public class Robot extends TimedRobot {
     // continue until interrupted by another command, remove
     // this line or comment it out.
     if (autonomousCommand != null) {
-      Scheduler.getDefault().cancel(autonomousCommand);
+      CommandScheduler.getInstance().cancel(autonomousCommand);
     }
   }
 
@@ -93,7 +93,7 @@ public class Robot extends TimedRobot {
   @Override
   public void utilityInit() {
     // Cancels all running commands at the start of utility mode.
-    Scheduler.getDefault().cancelAll();
+    CommandScheduler.getInstance().cancelAll();
   }
 
   /** This function is called periodically during utility mode. */

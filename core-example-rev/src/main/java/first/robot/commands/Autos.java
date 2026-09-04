@@ -6,7 +6,8 @@ package first.robot.commands;
 
 import static org.wpilib.units.Units.Seconds;
 
-import org.wpilib.command3.Command;
+import org.wpilib.command2.Command;
+import org.wpilib.command2.Commands;
 import org.wpilib.units.measure.Time;
 
 import first.robot.subsystems.TestSubsystem;
@@ -27,12 +28,11 @@ public final class Autos {
 
   public static Command fullMotorAuto(TestSubsystem testSubsystem) {
     Time timeout = Seconds.of(3);
-    return Command.sequence(
-            simpleClockwiseAuto(testSubsystem).withTimeout(timeout),
-            stopMotorInAuto(testSubsystem).withTimeout(timeout),
-            simpleCounterClockwiseAuto(testSubsystem).withTimeout(timeout),
-            stopMotorInAuto(testSubsystem))
-        .named("Full Motor Auto (Forward/Stop/Reverse)");
+    return Commands.sequence(
+        simpleClockwiseAuto(testSubsystem).withTimeout(timeout),
+        stopMotorInAuto(testSubsystem).withTimeout(timeout),
+        simpleCounterClockwiseAuto(testSubsystem).withTimeout(timeout),
+        stopMotorInAuto(testSubsystem));
   }
 
   private Autos() {

@@ -105,8 +105,9 @@ was deliberately left out on those grounds.
   to the RioBridge protocol. Confirms REVLib is in the same spot as CTRE Phoenix6 (both still
   published at alpha-6, contrary to what prompted building this) and that everything up to the
   native driver actually loading works against alpha-7 — the one thing that doesn't is a REV
-  packaging gap, not anything here. See `core-example-rev/README.md`, including a table of five
-  real API differences it found between alpha-6 and alpha-7 along the way.
+  packaging gap, not anything here, and it reproduces the same way regardless of command
+  framework (tried against both `command2` and `command3`). See `core-example-rev/README.md`,
+  including a table of real API differences it found between alpha-6 and alpha-7 along the way.
 
 None of the three has run against real hardware or a real CAN bus yet — see each directory's
 README for exactly what "builds and tests pass" does and doesn't cover.

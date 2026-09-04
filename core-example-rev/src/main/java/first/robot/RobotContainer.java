@@ -4,9 +4,10 @@
 
 package first.robot;
 
-import org.wpilib.command3.Command;
-import org.wpilib.command3.button.CommandGamepad;
+import org.wpilib.command2.Command;
+import org.wpilib.command2.button.GamepadButton;
 import org.wpilib.driverstation.Gamepad;
+import org.wpilib.driverstation.Gamepad.Button;
 
 import first.robot.commands.Autos;
 import first.robot.subsystems.TestSubsystem;
@@ -30,38 +31,30 @@ public class RobotContainer {
   // The autonomous routine
   private final Command simpleClockwiseAuto = Autos.simpleClockwiseAuto(testSubsystem);
 
-  CommandGamepad controller = new CommandGamepad(0);
+  Gamepad controller = new Gamepad(0);
 
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
     // Configure the button bindings
     configureButtonBindings();
 
-    // Configure default commands: motor idle unless a button is held
-    testSubsystem.setDefaultCommand(
-        testSubsystem
-            .run(coro -> testSubsystem.stop())
-            .withPriority(Command.LOWEST_PRIORITY)
-            .named("Motor Idle"));
+    // Default command: motor idle unless a button is held
+    testSubsystem.setDefaultCommand(testSubsystem.stopMotors());
   }
 
   /**
    * Use this method to define your button->command mappings. Buttons can be created by
    * instantiating a {@link org.wpilib.driverstation.GenericHID} or one of its subclasses ({@link
    * org.wpilib.driverstation.Joystick} or {@link Gamepad}), and then passing it to a {@link
-   * org.wpilib.command3.button.JoystickButton}.
+   * org.wpilib.command2.button.JoystickButton}.
    */
   private void configureButtonBindings() {
-    controller
-        .rightBumper()
-        .onTrue(Command.noRequirements(coro -> testSubsystem.runClockwise()).named("Run Clockwise"))
-        .onFalse(Command.noRequirements(coro -> testSubsystem.stopMotors()).named("Stop Motor"));
-    controller
-        .leftBumper()
-        .onTrue(
-            Command.noRequirements(coro -> testSubsystem.runCounterClockwise())
-                .named("Run Counterclockwise"))
-        .onFalse(Command.noRequirements(coro -> testSubsystem.stopMotors()).named("Stop Motor"));
+    new GamepadButton(controller, Button.RIGHT_BUMPER)
+        .onTrue(testSubsystem.runClockwise())
+        .onFalse(testSubsystem.stopMotors());
+    new GamepadButton(controller, Button.LEFT_BUMPER)
+        .onTrue(testSubsystem.runCounterClockwise())
+        .onFalse(testSubsystem.stopMotors());
   }
 
   /**
