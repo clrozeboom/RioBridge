@@ -207,7 +207,18 @@ one `command3`-only change -- `Mechanism` going from a class to an interface) --
 working, on either command framework, is REVLib's native driver actually loading (a missing
 `libBackendDriver.so` dependency, confirmed to be REV's packaging gap, not this repo's) -- if
 you're checking Phoenix6 instead, its native driver may or may not have the equivalent problem;
-that's what step 3 below actually tests.
+that's what step 3 below actually tests. A weekly Routine watches for a REVLib-driver release
+that fixes this.
+
+**Staying on WPILib alpha-6 instead of bumping to alpha-7 is possible but doesn't help
+RioBridge.** `core-example-rev/README.md`'s "Using WPILib alpha-6 instead" section has the
+mechanics (a year-frozen `release-2027` frcmaven repo still serves alpha-4 through alpha-6 in
+full, and reproduced the exact same REVLib failure there too -- ruling out an alpha-7-specific
+cause). But it also found that alpha-6's `CAN` class has no bus-selecting parameter at all, and
+`CANPort` -- the enum `core-integration/`'s whole design, and CTRE's `CANBus.systemcore(1)`,
+depend on -- doesn't exist in the alpha-6 jars. Multi-bus CAN addressing was introduced between
+alpha-6 and alpha-7, so alpha-7+ is a hard requirement for this repo's Core-side integration, not
+just what happened to be available when it was written.
 
 **Steps, for whatever vendor library and framework your Core project actually uses:**
 

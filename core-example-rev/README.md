@@ -39,8 +39,50 @@ gap in that specific REVLib release, not something wrong with the vendordep here
 uses it -- and it's unrelated to the command framework: it reproduced identically after switching
 from `command3` to `command2`, since it's REVLib's native driver failing to load regardless of
 which command framework calls it. See `RobotContainerTest`'s javadoc for the exact search that
-came up empty, and `vendordeps/REVLib.json` for the coordinates. Retry once REV ships a
-`REVLib-driver` build (any 2027 alpha) whose native library doesn't have this dangling dependency.
+came up empty, and `vendordeps/REVLib.json` for the coordinates.
+
+**Confirmed independent of WPILib version, too.** Built the same smoke test a third time against
+real, version-matched WPILib `2027.0.0-alpha-6` + REVLib `2027.0.0-alpha-6` (not alpha-7) -- see
+"Using WPILib alpha-6 instead" below for how that's even possible, since alpha-6 is gone from
+frcmaven's normal `release` repo. Identical failure, byte-for-byte same missing
+`libBackendDriver.so`. That rules out a WPILib-alpha-7-removed-something-REVLib-needed
+explanation: this is REV's packaging gap on its own, regardless of which WPILib version it's
+paired with. A weekly Routine checks `maven.revrobotics.com` for a REVLib-driver release that
+fixes this and will re-enable `RobotContainerTest` and push automatically if it finds one.
+
+## Using WPILib alpha-6 instead
+
+**You can, but not for anything that needs more than one CAN bus -- which includes RioBridge.**
+Two separate things had to be true for the alpha-6 test above to even build:
+
+1. **A repo that still serves it.** frcmaven's normal `release` repository only lists alpha-7 in
+   its metadata now (2027 alphas get overwritten there). But `org.wpilib.GradleRIO`, when pinned
+   to the exact plugin version `2027.0.0-alpha-6`, resolves its own dependencies against a
+   *different*, year-frozen repository -- `https://frcmaven.wpi.edu/artifactory/release-2027` --
+   which still has alpha-4 through alpha-6 in full (confirmed: `wpilibj-java`, `wpimath-java`,
+   `hal-java`, `wpiutil-java`, `commandsv2-java` all resolve from there with no extra
+   configuration beyond pinning the plugin version itself). If you need alpha-6, pin the
+   `org.wpilib.GradleRIO` plugin to `2027.0.0-alpha-6` and let it resolve normally -- you don't
+   need to add `release-2027` by hand, and you don't need `frcmaven`'s `development` channel
+   (which also has near-alpha-6 CI builds, e.g. `2027.0.0-alpha-6-359-g9582ba27b`, but
+   `release-2027` is simpler and is what's actually tagged).
+2. **A vendordep year tag that matches.** GradleRIO validates each vendordep's declared
+   `wpilibYear` against the plugin version, and the two don't number the same way: plugin
+   `2027.0.0-alpha-6` expects `"wpilibYear": "2027_alpha5"` (one step behind the numeric alpha --
+   confirmed by the error message when it doesn't match, and consistent with what
+   `BobCat-SystemCore-Clone`'s own alpha-6-pinned example projects already use).
+
+**Why this doesn't help RioBridge specifically:** alpha-6's `org.wpilib.hardware.bus.CAN` class
+has no bus-selecting parameter at all (`CAN(int, int)` / `CAN(int, int, int, int)` -- just a
+device ID and manufacturer/type, decompiled and confirmed directly) and `CANPort` -- the
+`CAN_S0`/`CAN_S1`/... enum this repo's Core-side integration and CTRE's `CANBus.systemcore(1)`
+both depend on -- doesn't exist in the alpha-6 jars at all. **Multi-bus CAN addressing was
+introduced between alpha-6 and alpha-7.** Since ADR-0002 (the RioBridge's whole reason for
+getting its own dedicated bus) depends on exactly that capability, alpha-6 isn't a viable target
+for `core-integration/` regardless of the REVLib question -- alpha-7 (or later) is a hard
+requirement, not just what happened to be available. `HAL.initialize()` also regains its
+2026-style `(int timeoutMs, int mode)` parameters at alpha-6, for what it's worth, if you're
+porting other code back too.
 
 ## Why v2 instead of v3
 
