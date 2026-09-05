@@ -105,6 +105,11 @@ public class RioBridgeCan implements AutoCloseable {
     return demux.malformedFrameCount();
   }
 
+  /** See {@link RioBridgeCanDemux#lastMalformedFrameDescription()}. */
+  public String lastMalformedFrameDescription() {
+    return demux.lastMalformedFrameDescription();
+  }
+
   public StatusFrame latestStatus() {
     return demux.latestStatus();
   }

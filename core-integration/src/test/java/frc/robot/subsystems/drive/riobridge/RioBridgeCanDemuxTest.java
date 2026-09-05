@@ -99,5 +99,8 @@ class RioBridgeCanDemuxTest {
         10,
         demux.latestEncoders().rawCounts()[0],
         "the last good frame should be kept, not clobbered by the malformed one");
+    assertTrue(
+        demux.lastMalformedFrameDescription().contains("dataLength=0"),
+        "the description should say what was actually wrong: " + demux.lastMalformedFrameDescription());
   }
 }
