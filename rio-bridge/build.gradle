@@ -18,7 +18,13 @@ deploy {
             debug = project.frc.getDebugOrDefault(false)
 
             artifacts {
-                frcJava(getArtifactTypeClass('FRCJavaArtifact')) {}
+                // jarTask has to be set explicitly -- FRCJavaArtifact's underlying jarProvider is a
+                // Gradle Property<Jar> with no default, so leaving this block empty fails at task-graph
+                // configuration time ("Cannot query the value of property 'jarProvider' because it has
+                // no value available"), before a deploy ever tries to reach real hardware.
+                frcJava(getArtifactTypeClass('FRCJavaArtifact')) {
+                    jarTask = jar
+                }
 
                 frcStaticFileDeploy(getArtifactTypeClass('FileTreeArtifact')) {
                     files = project.fileTree('src/main/deploy')
