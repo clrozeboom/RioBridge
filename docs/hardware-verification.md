@@ -215,10 +215,13 @@ corrupting one. That's not something more buffering or defensive code here fixes
   upstream WPILib.
 - [`clrozeboom/NerdSwerveYAGSL2026`](https://github.com/clrozeboom/NerdSwerveYAGSL2026)'s
   `claude/riobridge-can-fallback` branch -- a from-scratch `RioBridgeCan` rewrite using the older,
-  non-streaming, per-device `CAN`/`CANReceiveMessage` API instead of the stream session, on the
-  theory that it's a structurally different native code path that might not share this bug. Builds
-  clean against the real alpha-6 jars; **not yet confirmed to work on real hardware** -- that's
-  exactly what deploying it tests.
+  non-streaming, per-device `CAN`/`CANReceiveMessage` API instead of the stream session.
+  **Confirmed working on real hardware**: deployed to the same SystemCore, `malformedFrameCount`
+  stayed at 0 and previously-stuck-at-0 frame counts came back nonzero, across many consecutive
+  one-second windows. The payload-marshaling gap is specific to the stream session API -- this
+  per-device API doesn't share it. Trades away per-sample buffering to get there (see that
+  branch's `RioBridgeCan`/`DiagnosticsRobot` class javadoc for what that costs and why it's free
+  for this particular project).
 
 ## 4. Encoder channels: onboard vs. MXP
 

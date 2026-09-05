@@ -144,18 +144,24 @@ translation unit.
 The native implementation of `readCANStreamSession` (or whatever underlying buffer-copy routine
 feeds `CANStreamMessage.data`/`.length`) appears to correctly forward scalar fields
 (`timestamp`, `messageId`) but not the variable-length payload copy into the pre-existing Java
-`byte[] data` array on each `CANStreamMessage` object. Given the overflow-handling bug above is
-also in this same function's error path, it's plausible both stem from the same underlying
-native routine being incompletely ported/tested for this platform (SystemCore/Linux SocketCAN)
-rather than an issue specific to either bug in isolation.
+`byte[] data` array on each `CANStreamMessage` object. **Now narrowed further**: the older,
+non-streaming, per-device API (`CANAPIJNI.readCANPacketLatest`/`CANReceiveMessage`, on the same
+platform, same WPILib build, same physical CAN bus) does *not* share this problem — payload bytes
+marshal correctly there. So whatever's wrong is specific to the stream session's own buffer-copy
+path, not a platform-wide (SystemCore/Linux SocketCAN) JNI marshaling issue affecting every CAN
+read API alike. The overflow-handling segfault above is a separate finding in the same function's
+error path; whether it shares a root cause with the payload gap is still unconfirmed.
 
-## Workaround in use
+## Workaround in use — confirmed working on real hardware
 
 We moved off the stream session API entirely for our use case, to the older per-device API
 (`CANAPIJNI.initializeCAN` + `readCANPacketLatest`/`CANReceiveMessage`, wrapped by
-`org.wpilib.hardware.bus.CAN`). Whether that API correctly marshals payload bytes on this same
-platform is itself still being verified as of this writing — if it turns out to have the same
-gap, that would suggest the bug is broader than just the stream session's implementation.
+`org.wpilib.hardware.bus.CAN`). **Deployed and confirmed on the same real SystemCore, same
+WPILib build, same physical bus**: payload bytes now marshal correctly (a malformed-frame counter
+that had been climbing at the full combined send rate stayed at 0 across many consecutive
+one-second windows, and previously-stuck-at-0 frame counts came back nonzero). This pins the bug
+down specifically to the stream session code path (`readCANStreamSession`/`CANStreamMessage`) —
+the older per-device API on the same platform does not share it.
 
 ## Additional context
 
