@@ -83,4 +83,21 @@ class RioBridgeCanDemuxTest {
     assertNull(demux.latestEncoders());
     assertNull(demux.latestAttitude());
   }
+
+  @Test
+  void malformedFrameOnARecognizedArbitrationIdIsDroppedRatherThanThrowing() {
+    // Confirmed on real hardware: a message can match the Encoders arbitration ID with 0 bytes
+    // instead of the expected 8 (see RioBridgeCanDemux's class javadoc).
+    RioBridgeCanDemux demux = new RioBridgeCanDemux();
+    int[] raw = {10, 20, 30, 40};
+    demux.accept(message(CanIds.ENCODERS_ARBITRATION_ID, CanFrames.packEncoders(raw), 1_000_000));
+
+    demux.accept(message(CanIds.ENCODERS_ARBITRATION_ID, new byte[0], 2_000_000));
+
+    assertEquals(1, demux.malformedFrameCount());
+    assertEquals(
+        10,
+        demux.latestEncoders().rawCounts()[0],
+        "the last good frame should be kept, not clobbered by the malformed one");
+  }
 }

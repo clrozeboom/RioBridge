@@ -133,6 +133,15 @@ before. See `RioBridgeCan`'s class javadoc for the full writeup. This item's who
 finding out whether bus 1 ever falls behind under load -- is exactly the scenario that would
 trigger this, so treat any run of this tool as adequately buffered, not as safe to interrupt.
 
+**A frame can also arrive malformed rather than missing entirely -- also confirmed on real
+hardware.** A run hit a message that matched the Encoders arbitration ID with 0 bytes instead of
+the expected 8, which crashed the whole robot program with an uncaught
+`IllegalArgumentException` out of `CanFrames.unpackEncoders`. This is a third real rough edge in
+this exact `readCANStreamSession` code path (after the timestamp-unit ambiguity and the overflow
+segfault, both above) -- `RioBridgeCanDemux.accept` now drops a frame that fails to unpack
+instead of letting the exception escape, tracked via the new `malformedFrameCount`. See
+`RioBridgeCanDemux`'s class javadoc.
+
 **Tool:** [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/DiagnosticsRobot.java)
 -- the same one from item 1; it keeps running after the one-shot timestamp check.
 
@@ -166,7 +175,7 @@ this process) -- not a RioBridge problem, and not something to debug via this to
    ```
    CAN_S0: util=23.4% busOff=0 txFull=0 rxErr=0 txErr=0
    CAN_S1: util=1.2% busOff=0 txFull=0 rxErr=0 txErr=0
-     RioBridgeCan: attitudeFramesLastSecond=100 (expect ~100 at 100 Hz) overflowCount=0
+     RioBridgeCan: attitudeFramesLastSecond=100 (expect ~100 at 100 Hz) overflowCount=0 malformedFrameCount=0
    ```
 
 **Pass criteria, all of these for the whole run:**
@@ -176,6 +185,10 @@ this process) -- not a RioBridge problem, and not something to debug via this to
   whether you narrowly avoided the crash described above. Any nonzero value means a real overflow
   happened and you got lucky it didn't take the JVM down with it; stop and investigate rather than
   shrugging off "just some drops."
+- `malformedFrameCount` stays at `0`. A nonzero value means a frame arrived matching one of the
+  protocol's three arbitration IDs but not shaped like that frame -- confirmed to happen (see
+  above), cause not fully understood, worth investigating rather than ignoring even though it no
+  longer crashes anything.
 - `attitudeFramesLastSecond` stays close to 100 (a few frames off from jitter is normal; a
   sustained drop below is a problem even if `overflowCount` hasn't incremented yet).
 - Neither bus shows a `REGRESSED` flag -- i.e. `busOffCount`, `txFullCount`,
