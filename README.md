@@ -20,9 +20,11 @@ were considered and rejected.
 ## Hardware this was designed against
 
 - **Core** — Raspberry Pi 5 + dual-channel Waveshare CAN HAT (no-FD), running Limelight
-  SystemCore OS with WPILib `2027.0.0-alpha-7` (updated from `alpha-6`, which is no longer
-  resolvable from frcmaven — see below) and AdvantageKit `v27.0.0-alpha-4`. Built from
-  [BobcatRobotics/SystemCore-Clone](https://github.com/BobcatRobotics/SystemCore-Clone).
+  SystemCore OS with WPILib `2027.0.0-alpha-7` (updated from `alpha-6`) and AdvantageKit
+  `v27.0.0-alpha-4`. Built from
+  [BobcatRobotics/SystemCore-Clone](https://github.com/BobcatRobotics/SystemCore-Clone). Staying
+  on alpha-6 instead turned out not to be blocked the way this line used to say — see
+  `core-example-rev/README.md`'s "Using WPILib alpha-6 instead" for the corrected story.
 - **RioBridge** — roboRIO with a navX2 on the MXP port and four analog absolute encoders.
 - **Robot** — swerve on REV SPARK MAX, PDH terminating CAN bus 0.
 

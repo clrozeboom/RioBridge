@@ -210,15 +210,19 @@ you're checking Phoenix6 instead, its native driver may or may not have the equi
 that's what step 3 below actually tests. A weekly Routine watches for a REVLib-driver release
 that fixes this.
 
-**Staying on WPILib alpha-6 instead of bumping to alpha-7 is possible but doesn't help
-RioBridge.** `core-example-rev/README.md`'s "Using WPILib alpha-6 instead" section has the
-mechanics (a year-frozen `release-2027` frcmaven repo still serves alpha-4 through alpha-6 in
-full, and reproduced the exact same REVLib failure there too -- ruling out an alpha-7-specific
-cause). But it also found that alpha-6's `CAN` class has no bus-selecting parameter at all, and
-`CANPort` -- the enum `core-integration/`'s whole design, and CTRE's `CANBus.systemcore(1)`,
-depend on -- doesn't exist in the alpha-6 jars. Multi-bus CAN addressing was introduced between
-alpha-6 and alpha-7, so alpha-7+ is a hard requirement for this repo's Core-side integration, not
-just what happened to be available when it was written.
+**Staying on WPILib alpha-6 instead of bumping to alpha-7 is possible, RioBridge included.**
+`core-example-rev/README.md`'s "Using WPILib alpha-6 instead" section has the mechanics (a
+year-frozen `release-2027` frcmaven repo still serves alpha-4 through alpha-6 in full, and
+reproduced the exact same REVLib failure there too -- ruling out an alpha-7-specific cause) and
+the corrected multi-bus story: alpha-6's friendly `CAN`/`CANPort` API genuinely has no
+bus-selecting option, but `core-integration/`'s design never used that API -- it calls
+`CANJNI.openCANStreamSession` directly, which already takes a raw HAL bus id (`int`) at alpha-6,
+same as alpha-7, just without `CANPort`'s enum wrapper around it
+(`org.wpilib.hardware.hal.CANBusMap` has the same values as plain ints). Confirmed by actually
+applying this repo's design to a real alpha-6 project, not just decompiling -- see that section.
+This repo still targets alpha-7 since there's no reason to prefer the older one once the REVLib
+gap turned out to be version-independent, but alpha-6 was never actually the blocker it was first
+reported as.
 
 **Steps, for whatever vendor library and framework your Core project actually uses:**
 

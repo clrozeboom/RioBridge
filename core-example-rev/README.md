@@ -52,8 +52,12 @@ fixes this and will re-enable `RobotContainerTest` and push automatically if it 
 
 ## Using WPILib alpha-6 instead
 
-**You can, but not for anything that needs more than one CAN bus -- which includes RioBridge.**
-Two separate things had to be true for the alpha-6 test above to even build:
+**You can, including for RioBridge's multi-bus CAN needs** -- corrected after actually applying
+`core-integration/`'s design to a real alpha-6-pinned project
+([clrozeboom/NerdSwerveYAGSL2026](https://github.com/clrozeboom/NerdSwerveYAGSL2026)'s
+`claude/swerve-2027-advantagekit` branch) rather than a from-scratch probe; see "The corrected
+multi-bus story" below for what that changed here. Two separate things had to be true for the
+alpha-6 test above to even build:
 
 1. **A repo that still serves it.** frcmaven's normal `release` repository only lists alpha-7 in
    its metadata now (2027 alphas get overwritten there). But `org.wpilib.GradleRIO`, when pinned
@@ -72,17 +76,30 @@ Two separate things had to be true for the alpha-6 test above to even build:
    confirmed by the error message when it doesn't match, and consistent with what
    `BobCat-SystemCore-Clone`'s own alpha-6-pinned example projects already use).
 
-**Why this doesn't help RioBridge specifically:** alpha-6's `org.wpilib.hardware.bus.CAN` class
-has no bus-selecting parameter at all (`CAN(int, int)` / `CAN(int, int, int, int)` -- just a
-device ID and manufacturer/type, decompiled and confirmed directly) and `CANPort` -- the
-`CAN_S0`/`CAN_S1`/... enum this repo's Core-side integration and CTRE's `CANBus.systemcore(1)`
-both depend on -- doesn't exist in the alpha-6 jars at all. **Multi-bus CAN addressing was
-introduced between alpha-6 and alpha-7.** Since ADR-0002 (the RioBridge's whole reason for
-getting its own dedicated bus) depends on exactly that capability, alpha-6 isn't a viable target
-for `core-integration/` regardless of the REVLib question -- alpha-7 (or later) is a hard
-requirement, not just what happened to be available. `HAL.initialize()` also regains its
-2026-style `(int timeoutMs, int mode)` parameters at alpha-6, for what it's worth, if you're
-porting other code back too.
+**The corrected multi-bus story:** alpha-6's `org.wpilib.hardware.bus.CAN` class genuinely has no
+bus-selecting parameter (`CAN(int, int)` / `CAN(int, int, int, int)` -- just a device ID and
+manufacturer/type, decompiled and confirmed directly), and `CANPort` -- the friendly
+`CAN_S0`/`CAN_S1`/... enum -- genuinely doesn't exist in `wpilibj-java` at alpha-6 either. That
+part of the original finding was right. What was wrong was the conclusion drawn from it: this
+repo's own `RioBridgeCan` never used `CAN` or `CANPort` in the first place -- it calls
+`CANJNI.openCANStreamSession` directly, and decompiling `hal-java` at alpha-6 shows that method
+(along with `getCANStatus` and the rest of `CANJNI`) already takes a raw bus id `int` as its first
+argument, same as at alpha-7. `org.wpilib.hardware.hal.CANBusMap` -- already on the classpath via
+`hal-java`, a transitive dependency of `wpilibj-java` -- exposes the exact same
+`CAN_S0`/`CAN_S1`/.../`CAN_D19` values `CANPort` would, just as plain `int` constants instead of
+enum entries. `CANPort` is a friendlier wrapper added between alpha-6 and alpha-7; the multi-bus
+*capability* underneath it was there all along.
+
+Confirmed by more than decompiling: `RioBridgeCan`, its diagnostics, and a `GyroIO`/absolute
+encoder integration built on it were actually applied to a real alpha-6-pinned project (see
+above), swapping `CANPort bus` parameters for `int bus` sourced from `CANBusMap`, and
+`./gradlew build` passes in full against the real alpha-6 jars -- not a scratch probe. So alpha-6
+*is* a viable target for `core-integration/`'s design; this repo stays on alpha-7 anyway since
+there's no reason to prefer the older one once REVLib's native-driver gap turns out to be
+unrelated to either version (see above), but a project with some other reason to be stuck on
+alpha-6 doesn't have to also give up RioBridge's dedicated-bus design over it. `HAL.initialize()`
+also regains its 2026-style `(int timeoutMs, int mode)` parameters at alpha-6, for what it's
+worth, if you're porting other code back too.
 
 ## Why v2 instead of v3
 
