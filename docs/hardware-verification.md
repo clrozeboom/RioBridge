@@ -205,6 +205,21 @@ send rates are fixed by the protocol table and ADR-0004's explicit-sends design.
 outright rather than reporting a nonzero `overflowCount`, that's the native bug above, not a new
 failure mode to chase separately.
 
+**If `malformedFrameCount` climbs at close to the full ~220/sec combined rate with
+`attitudeFramesLastSecond` stuck at 0** -- confirmed to actually happen, not a hypothetical -- the
+stream session isn't delivering payload bytes at all on this WPILib build, not just occasionally
+corrupting one. That's not something more buffering or defensive code here fixes. See:
+
+- [`docs/wpilib-bug-report-can-stream-payload.md`](wpilib-bug-report-can-stream-payload.md) -- a
+  drafted (not yet filed) bug report with the full evidence, for whoever wants to file it against
+  upstream WPILib.
+- [`clrozeboom/NerdSwerveYAGSL2026`](https://github.com/clrozeboom/NerdSwerveYAGSL2026)'s
+  `claude/riobridge-can-fallback` branch -- a from-scratch `RioBridgeCan` rewrite using the older,
+  non-streaming, per-device `CAN`/`CANReceiveMessage` API instead of the stream session, on the
+  theory that it's a structurally different native code path that might not share this bug. Builds
+  clean against the real alpha-6 jars; **not yet confirmed to work on real hardware** -- that's
+  exactly what deploying it tests.
+
 ## 4. Encoder channels: onboard vs. MXP
 
 **What/why:** `rio-bridge/`'s `Robot.java` currently assumes all four absolute encoders are on

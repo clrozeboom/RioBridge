@@ -76,19 +76,21 @@ alpha-6 test above to even build:
    confirmed by the error message when it doesn't match, and consistent with what
    `BobCat-SystemCore-Clone`'s own alpha-6-pinned example projects already use).
 
-**The corrected multi-bus story:** alpha-6's `org.wpilib.hardware.bus.CAN` class genuinely has no
-bus-selecting parameter (`CAN(int, int)` / `CAN(int, int, int, int)` -- just a device ID and
-manufacturer/type, decompiled and confirmed directly), and `CANPort` -- the friendly
-`CAN_S0`/`CAN_S1`/... enum -- genuinely doesn't exist in `wpilibj-java` at alpha-6 either. That
-part of the original finding was right. What was wrong was the conclusion drawn from it: this
-repo's own `RioBridgeCan` never used `CAN` or `CANPort` in the first place -- it calls
-`CANJNI.openCANStreamSession` directly, and decompiling `hal-java` at alpha-6 shows that method
-(along with `getCANStatus` and the rest of `CANJNI`) already takes a raw bus id `int` as its first
-argument, same as at alpha-7. `org.wpilib.hardware.hal.CANBusMap` -- already on the classpath via
-`hal-java`, a transitive dependency of `wpilibj-java` -- exposes the exact same
-`CAN_S0`/`CAN_S1`/.../`CAN_D19` values `CANPort` would, just as plain `int` constants instead of
-enum entries. `CANPort` is a friendlier wrapper added between alpha-6 and alpha-7; the multi-bus
-*capability* underneath it was there all along.
+**The corrected multi-bus story, corrected again:** `CANPort` -- the friendly `CAN_S0`/`CAN_S1`/...
+enum -- genuinely doesn't exist in `wpilibj-java` at alpha-6; that part holds. But the claim that
+used to sit here -- that `org.wpilib.hardware.bus.CAN` itself has no bus-selecting parameter at
+alpha-6 -- was wrong, and was based on a `javap` signature listing (which shows parameter *types*,
+not names) rather than the real decompiled source. With the actual source in hand:
+`CAN(int busId, int deviceId)` and `CAN(int busId, int deviceId, int deviceManufacturer, int
+deviceType)` both take the bus as their **first** parameter, passed straight through to
+`CANAPIJNI.initializeCAN(busId, ...)`. So the friendly `CAN` class was never missing bus selection
+at alpha-6 either -- only the `CANPort` enum wrapper around it was. `CANJNI.openCANStreamSession`
+(and the rest of `CANJNI`) separately already takes a raw bus id `int` as its first argument, same
+as at alpha-7, and `org.wpilib.hardware.hal.CANBusMap` -- already on the classpath via `hal-java`,
+a transitive dependency of `wpilibj-java` -- exposes the exact same `CAN_S0`/`CAN_S1`/.../`CAN_D19`
+values `CANPort` would, just as plain `int` constants instead of enum entries. `CANPort` is a
+friendlier wrapper added between alpha-6 and alpha-7; the multi-bus *capability* underneath it,
+at every layer we've now actually checked, was there all along.
 
 Confirmed by more than decompiling: `RioBridgeCan`, its diagnostics, and a `GyroIO`/absolute
 encoder integration built on it were actually applied to a real alpha-6-pinned project (see
