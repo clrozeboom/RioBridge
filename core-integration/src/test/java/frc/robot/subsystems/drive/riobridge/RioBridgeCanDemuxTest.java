@@ -14,9 +14,9 @@ import org.wpilib.hardware.hal.can.CANStreamMessage;
 /** Exercises {@link RioBridgeCanDemux#accept} against hand-built {@link CANStreamMessage}s. */
 class RioBridgeCanDemuxTest {
   /** Builds a {@link CANStreamMessage} the way {@code accept} expects to receive one. */
-  private static CANStreamMessage message(int messageId, byte[] payload, long timestampMillis) {
+  private static CANStreamMessage message(int messageId, byte[] payload, long timestampMicros) {
     CANStreamMessage message = new CANStreamMessage();
-    byte[] buffer = message.setStreamData(payload.length, 0, messageId, timestampMillis);
+    byte[] buffer = message.setStreamData(payload.length, 0, messageId, timestampMicros);
     System.arraycopy(payload, 0, buffer, 0, payload.length);
     return message;
   }
@@ -26,7 +26,7 @@ class RioBridgeCanDemuxTest {
     RioBridgeCanDemux demux = new RioBridgeCanDemux();
     byte[] payload =
         CanFrames.packStatus(42, 100, CanFrames.FLAG_NAVX_CONNECTED, CanFrames.PROTOCOL_VERSION);
-    demux.accept(message(CanIds.STATUS_ARBITRATION_ID, payload, 5_000));
+    demux.accept(message(CanIds.STATUS_ARBITRATION_ID, payload, 5_000_000));
 
     assertEquals(42, demux.latestStatus().loopCounter());
     assertTrue(demux.latestStatus().navxConnected());
@@ -37,7 +37,7 @@ class RioBridgeCanDemuxTest {
   void encodersFrameUpdatesLatestEncoders() {
     RioBridgeCanDemux demux = new RioBridgeCanDemux();
     int[] raw = {10, 20, 30, 40};
-    demux.accept(message(CanIds.ENCODERS_ARBITRATION_ID, CanFrames.packEncoders(raw), 1_000));
+    demux.accept(message(CanIds.ENCODERS_ARBITRATION_ID, CanFrames.packEncoders(raw), 1_000_000));
 
     assertEquals(10, demux.latestEncoders().rawCounts()[0]);
     assertEquals(40, demux.latestEncoders().rawCounts()[3]);
@@ -48,8 +48,10 @@ class RioBridgeCanDemuxTest {
   void attitudeFramesAccumulateInOrderUntilDrained() {
     RioBridgeCanDemux demux = new RioBridgeCanDemux();
     demux.accept(message(CanIds.ATTITUDE_ARBITRATION_ID, CanFrames.packAttitude(1, 0, 0, 0), 0));
-    demux.accept(message(CanIds.ATTITUDE_ARBITRATION_ID, CanFrames.packAttitude(2, 0, 0, 0), 10));
-    demux.accept(message(CanIds.ATTITUDE_ARBITRATION_ID, CanFrames.packAttitude(3, 0, 0, 0), 20));
+    demux.accept(
+        message(CanIds.ATTITUDE_ARBITRATION_ID, CanFrames.packAttitude(2, 0, 0, 0), 10_000));
+    demux.accept(
+        message(CanIds.ATTITUDE_ARBITRATION_ID, CanFrames.packAttitude(3, 0, 0, 0), 20_000));
 
     assertEquals(3.0, demux.latestAttitude().attitude().yawDeg(), 1e-6);
 

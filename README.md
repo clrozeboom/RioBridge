@@ -125,11 +125,14 @@ README for exactly what "builds and tests pass" does and doesn't cover.
 Step-by-step procedures for all of these, including runnable diagnostics for items 1, 3 and 4,
 are in [docs/hardware-verification.md](docs/hardware-verification.md).
 
-1. `CANStreamMessage.timestamp` units — **confirmed genuinely ambiguous**, not just a concern:
-   the field comment on the real 2027.0.0-alpha-7 source says milliseconds/`CLOCK_MONOTONIC`,
-   `setStreamData`'s parameter javadoc on the *same class* says nanoseconds. `core-integration/`
-   follows the field comment; print a raw value against a known interval and confirm before
-   trusting the 100 ms gyro staleness threshold.
+1. ~~`CANStreamMessage.timestamp` units~~ — **resolved**: the field comment on the real
+   2027.0.0-alpha-7 source says milliseconds/`CLOCK_MONOTONIC`, `setStreamData`'s parameter
+   javadoc on the *same class* says nanoseconds -- neither was right. A real
+   `TimestampUnitsCheck` run against real hardware measured `secondsPerUnit ~= 1e-6`
+   (wall-clock elapsed=1.946s against a raw timestamp delta of 1,950,175 over 40 Status frames at
+   20 Hz): **microseconds**. `core-integration/`'s `RioBridgeCanDemux` now scales by that instead
+   of the milliseconds guess it shipped with. See
+   [docs/hardware-verification.md](docs/hardware-verification.md) item 1.
 2. ~~HAT channel 1 termination jumper is actually set~~ — **resolved**: measured ~60 Ohms across
    CAN_H/CAN_L with the RioBridge and Core's CAN_S1 connected end-to-end, confirming both the
    roboRIO's internal terminator and the HAT channel 1 terminator are present and in circuit

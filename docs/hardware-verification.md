@@ -12,10 +12,15 @@ then 5 (build compatibility) whenever is convenient, since it doesn't touch hard
 
 ## 1. `CANStreamMessage.timestamp` units
 
-**What/why:** `core-integration/`'s own source confirmed the real 2027.0.0-alpha-7 API
+**Resolved.** `core-integration/`'s own source confirmed the real 2027.0.0-alpha-7 API
 contradicts itself -- the field's javadoc says milliseconds, `setStreamData`'s parameter javadoc
-on the same class says nanoseconds. `RioBridgeCanDemux` picks milliseconds; this either confirms
-that or tells you to fix it.
+on the same class says nanoseconds -- and a real run of this exact tool against real hardware
+settled it as neither: `secondsPerUnit ~= 1e-6` (wall-clock elapsed=1.946s against a raw
+timestamp delta of 1,950,175 over 40 Status frames at 20 Hz) is **microseconds**.
+`RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is `1.0 / 1_000_000.0` now, not the milliseconds guess
+it shipped with. The steps below are kept as a runbook for anyone re-verifying this on their own
+hardware (a different Core OS/kernel/HAL build could plausibly differ), not because the answer
+is still open.
 
 **Tool:** [`TimestampUnitsCheck`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/TimestampUnitsCheck.java),
 driven by [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/DiagnosticsRobot.java)
@@ -39,20 +44,25 @@ driven by [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsy
 
    ```
    === TimestampUnitsCheck: collecting Status frames on CAN_S1 ===
-     wall-clock elapsed=1.950s, raw timestamp delta=1950, secondsPerUnit=1e-03
-     MILLISECONDS (secondsPerUnit ~= 1e-3): matches the field javadoc.
+     wall-clock elapsed=1.946s, raw timestamp delta=1950175, secondsPerUnit=9.98074e-07
+     MICROSECONDS (secondsPerUnit ~= 1e-6): neither javadoc claimed this -- worth a second look before trusting it.
    ```
 
-**Pass criteria:** the verdict line says `MILLISECONDS` or `NANOSECONDS` outright (not
-`MICROSECONDS`, which neither javadoc claimed and deserves a second look, and not
-`UNRECOGNIZED`, which means something's wrong with the setup, not the units -- most likely the
-RioBridge isn't transmitting, isn't on this bus, or isn't powered; the check prints "FAILED" if
-it never saw two Status frames within its timeout).
+   (That's the actual output from the real run that settled this -- yours should land close to
+   `secondsPerUnit ~= 1e-6` too.)
 
-**If it says NANOSECONDS:** `RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is currently `1.0 / 1000.0`
-(milliseconds). Change it to `1.0 / 1_000_000_000.0`, and drop the "confirmed genuinely
-ambiguous" note in `core-integration/README.md` and the root README in favor of the actual
-answer.
+**Pass criteria:** the verdict line says `MICROSECONDS` -- that's the confirmed answer now, not
+the surprising case the tool's own message text still frames it as. `MILLISECONDS` or
+`NANOSECONDS` would mean a different Core build genuinely behaves differently from the one this
+was confirmed against, which is worth its own investigation rather than assuming the fix above
+still applies as-is. `UNRECOGNIZED` means something's wrong with the setup, not the units -- most
+likely the RioBridge isn't transmitting, isn't on this bus, or isn't powered; the check prints
+"FAILED" if it never saw two Status frames within its timeout.
+
+**If you get anything other than MICROSECONDS:** `RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is
+currently `1.0 / 1_000_000.0` (microseconds). Change it to match what you actually measured
+(`1.0 / 1000.0` for milliseconds, `1.0 / 1_000_000_000.0` for nanoseconds), and update this file
+plus the root README and `core-integration/README.md` to say so.
 
 ## 2. HAT channel 1 termination jumper
 
@@ -110,12 +120,29 @@ PDH) is far busier than bus 1 (the RioBridge alone), so the open question is whe
 **Tool:** [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/DiagnosticsRobot.java)
 -- the same one from item 1; it keeps running after the one-shot timestamp check.
 
+**A CAN_S0 (or CAN_S1) reading can legitimately be unavailable, not just regressed.**
+`CANJNI.getCANStatus` can throw at the HAL layer for a bus nothing in this process has otherwise
+touched -- confirmed on real hardware, on the drivetrain bus specifically, since
+`DiagnosticsRobot` replaces the real robot code for this one deploy and so never constructs a
+SPARK MAX or opens any session on bus 0 itself. `DiagnosticsRobot` now catches this per bus and
+prints `<bus>: status unavailable (...)` instead of crashing and losing visibility into the
+*other* bus's real data. If you see that for `CAN_S0`, it most likely means that bus's SocketCAN
+interface isn't brought up on the Core yet (or nothing on it has ever been powered/queried in
+this process) -- not a RioBridge problem, and not something to debug via this tool.
+
 **Steps:**
 
 1. Deploy `DiagnosticsRobot` as in item 1, with the RioBridge powered and transmitting.
-2. **Actually load bus 0** -- command the swerve drivetrain (on blocks, or however you'd safely
-   bench-test it) for the duration of the run. An idle bus 0 doesn't exercise the shared SPI
-   master at all, and would make this check pass trivially without checking anything.
+2. **Load bus 0 if you can.** `DiagnosticsRobot` fully replaces the real robot program for this
+   deploy, so it can't command the swerve drivetrain itself -- there's no code path left that
+   would. What bus-0 traffic you do see comes from whatever's independently powered on that bus
+   (a PDH broadcasts its own status continuously just from being powered; SPARK MAXes send
+   periodic status frames at idle even uncommanded), which is real traffic but lighter than a
+   commanded drivetrain would produce. If you need a genuinely loaded bus 0, do this measurement
+   with the real robot code running instead (temporarily add this diagnostic's prints into it,
+   rather than swapping `Main` to `DiagnosticsRobot`), or accept the idle-bus reading as a lighter
+   version of the same check. An idle bus 0 that still shows 0% utilization and no CAN_S0 status
+   at all is worth investigating on its own -- it means nothing on that bus is even powered up.
 3. Let it run for at least a few minutes -- long enough to see whether problems are transient
    (one bad SPI transaction) or sustained (consistently falling behind).
 4. Watch the once-per-second console output:

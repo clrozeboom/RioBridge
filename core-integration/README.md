@@ -78,18 +78,29 @@ Foojay resolver if none is found locally; if your Core project targets an older 
 you'll hit the same `class file has wrong version` error these files did until you do the same
 (or your project's WPILib version already forces this and you won't need to do anything).
 
-**Not verified against real hardware or the desktop HAL sim:** `RioBridgeCan.poll()` and its
-constructor, and everything in `diagnostics/` that calls `CANJNI` directly (`TimestampUnitsCheck`'s
-session, `BusHealthMonitor.sample`) -- there's no simulated CAN bus in this sandbox to open a
-stream session or query bus status against, so none of it has actually run. Everything they call
-is the exact `CANJNI`/`CANStreamMessage`/`CANStatus` API pulled from the real alpha-7 sources
-(`org.wpilib.hardware.hal.can`), not a guess, but "compiles against the real signature" and
-"behaves correctly against a live bus" are different claims -- which is exactly what running the
-diagnostics on your actual hardware settles.
+**Not verified against real hardware or the desktop HAL sim in this exact, alpha-7 form:**
+`RioBridgeCan.poll()` and its constructor, and everything in `diagnostics/` that calls `CANJNI`
+directly, still haven't run as the code sitting in this directory -- there's no simulated CAN bus
+in this sandbox to open a stream session or query bus status against. But the identical design,
+hand-ported to a real alpha-6-pinned robot project
+([clrozeboom/NerdSwerveYAGSL2026](https://github.com/clrozeboom/NerdSwerveYAGSL2026)'s
+`claude/riobridge-core-integration` branch), *has* run on real hardware -- see the two findings
+below, both of which came from that run and are already applied here.
 
-**Confirmed as a genuine open question, not just this repo's uncertainty:** the root README's "To
-verify" list flags `CANStreamMessage.timestamp`'s units as ambiguous between the field's own
-javadoc (milliseconds, `CLOCK_MONOTONIC`) and `setStreamData`'s parameter javadoc (nanoseconds) --
-*on the same class*, in the real alpha-7 source. `RioBridgeCanDemux` follows the field comment
-(milliseconds); see its class javadoc and print a raw value against a known interval before
-trusting `GyroIORioBridge`'s 100 ms staleness threshold on hardware.
+**`CANStreamMessage.timestamp`'s units: resolved, not just less uncertain.** The root README's
+"To verify" list used to flag this as ambiguous between the field's own javadoc (milliseconds,
+`CLOCK_MONOTONIC`) and `setStreamData`'s parameter javadoc (nanoseconds) -- *on the same class*,
+in the real alpha-7 source. Neither was right: a real `TimestampUnitsCheck` run measured
+`secondsPerUnit ~= 1e-6` (wall-clock elapsed=1.946s against a raw timestamp delta of 1,950,175
+over 40 Status frames at 20 Hz) -- **microseconds**. `RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is
+`1.0 / 1_000_000.0` now, not the milliseconds guess it shipped with; see its class javadoc and
+[docs/hardware-verification.md](../docs/hardware-verification.md) item 1.
+
+**`BusHealthMonitor`/`DiagnosticsRobot` needed a resilience fix, found by the same run.**
+`CANJNI.getCANStatus` threw a `HalHandleException` querying the drivetrain bus specifically --
+`DiagnosticsRobot` never constructs a device or opens a session on that bus itself (it fully
+replaces the real robot code for one deploy), so nothing in that process had ever touched it.
+Left uncaught, that crashed the whole diagnostic and took the RioBridge bus's real, working data
+down with it. `sampleSafely` in `DiagnosticsRobot` now catches this per bus and prints
+`<bus>: status unavailable (...)` instead -- see [docs/hardware-verification.md](../docs/hardware-verification.md)
+item 3.
