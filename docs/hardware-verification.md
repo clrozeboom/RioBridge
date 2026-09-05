@@ -117,6 +117,22 @@ There are two stages here, and they answer different questions -- don't stop at 
 PDH) is far busier than bus 1 (the RioBridge alone), so the open question is whether reading bus
 1's stream session ever falls behind while bus 0 is being serviced.
 
+**Falling behind isn't just lossy on this WPILib build -- it crashes the JVM outright, confirmed
+on real hardware.** `RioBridgeCan.poll()`'s `catch (CANStreamOverflowException)` was written
+assuming ADR-0004's "a dropped frame is fine" story. It isn't, for this specific exception: a
+real overflow (an earlier version of `DiagnosticsRobot` left its own session unpolled for ~2.8s
+at ~220 frames/sec, far past its old 32-message buffer) segfaulted the whole JVM --
+`SIGSEGV`/`SEGV_MAPERR` at address `0x0`, inside the native code that's supposed to construct and
+throw `CANStreamOverflowException` in the first place (`wpi::hal::ThrowCANStreamOverflowException`
+in `libwpiHaljni.so`, called from `CANJNI.readCANStreamSession`), before any Java `catch` block
+ever got a chance to run. That's a genuine upstream bug, not something fixable from this repo's
+code -- the only mitigation available is never actually triggering a real overflow: size
+`maxMessagesPerPoll` generously (`RioBridgeCan.java` and `DiagnosticsRobot.java` both use 1024
+now, not the original 32) and construct the session right before you start polling it, not long
+before. See `RioBridgeCan`'s class javadoc for the full writeup. This item's whole purpose --
+finding out whether bus 1 ever falls behind under load -- is exactly the scenario that would
+trigger this, so treat any run of this tool as adequately buffered, not as safe to interrupt.
+
 **Tool:** [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/DiagnosticsRobot.java)
 -- the same one from item 1; it keeps running after the one-shot timestamp check.
 
@@ -155,18 +171,26 @@ this process) -- not a RioBridge problem, and not something to debug via this to
 
 **Pass criteria, all of these for the whole run:**
 
-- `overflowCount` stays at `0`. This is the direct signal: it only increments when
-  `RioBridgeCan.poll()` catches a `CANStreamOverflowException`, meaning the session's buffer
-  filled between polls and a frame was actually dropped, not just delayed.
+- `overflowCount` stays at `0`. Read this one differently from a normal "counts a handled error"
+  metric -- it isn't asking whether drops were survivable, it's the only visibility you have into
+  whether you narrowly avoided the crash described above. Any nonzero value means a real overflow
+  happened and you got lucky it didn't take the JVM down with it; stop and investigate rather than
+  shrugging off "just some drops."
 - `attitudeFramesLastSecond` stays close to 100 (a few frames off from jitter is normal; a
   sustained drop below is a problem even if `overflowCount` hasn't incremented yet).
 - Neither bus shows a `REGRESSED` flag -- i.e. `busOffCount`, `txFullCount`,
   `receiveErrorCount`, and `transmitErrorCount` never increase from one second to the next, on
   either bus.
+- The process is still running at the end of the observation window at all. A crash (not a clean
+  exit) during this run that you didn't cause yourself (killing the deploy, power loss) likely
+  *is* the overflow-segfault above -- check for an `hs_err_pid*.log` on the Core before assuming
+  it's something else.
 
 **If it fails:** the fix is almost certainly on the Core side (reduce how much else shares the
 SPI master, or how often you poll), not something to change in the RioBridge -- the RioBridge's
-send rates are fixed by the protocol table and ADR-0004's explicit-sends design.
+send rates are fixed by the protocol table and ADR-0004's explicit-sends design. If it crashed
+outright rather than reporting a nonzero `overflowCount`, that's the native bug above, not a new
+failure mode to chase separately.
 
 ## 4. Encoder channels: onboard vs. MXP
 

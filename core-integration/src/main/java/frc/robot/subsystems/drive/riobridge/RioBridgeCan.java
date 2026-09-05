@@ -15,10 +15,28 @@ import org.wpilib.hardware.hal.can.CANStreamOverflowException;
  * whatever reads the encoders (see {@link #latestEncoders()}) as well as {@link
  * GyroIORioBridge} -- don't open a second session.
  *
+ * <p><b>An actual buffer overflow crashes the JVM on real hardware -- confirmed, not
+ * theoretical.</b> {@link #poll}'s {@code catch (CANStreamOverflowException)} below was written
+ * assuming ADR-0004's "a dropped frame is fine, the protocol tolerates it" story, the same way a
+ * missed UDP packet would be. That's wrong for this specific exception on this WPILib build: a
+ * real overflow (an alpha-6-pinned {@code DiagnosticsRobot} left its own session unpolled for
+ * ~2.8s while transmitting at ~220 frames/sec, far past its old 32-message buffer) segfaulted
+ * before the catch block ever ran -- {@code SIGSEGV}, {@code SEGV_MAPERR}, address {@code 0x0},
+ * inside {@code wpi::hal::ThrowCANStreamOverflowException}'s call to {@code JNIEnv_::NewObject}
+ * in {@code libwpiHaljni.so}, called from {@code CANJNI.readCANStreamSession}. The native code
+ * that's supposed to construct and throw this exception null-derefs instead, so nothing in Java
+ * -- no try/catch here or anywhere else -- ever gets a chance to run. That makes avoiding a real
+ * overflow a hard requirement, not a nice-to-have: size {@code maxMessagesPerPoll} generously
+ * (comfortably above frames-per-second times the longest realistic gap between polls, not just
+ * the steady-state case) and never construct a session long before you start polling it, the way
+ * {@code DiagnosticsRobot} used to. {@link #overflowCount()} should read as "this never actually
+ * happened," not "this happened and got handled."
+ *
  * <p>The actual demux/decode logic lives in {@link RioBridgeCanDemux}, which has no JNI in it and
  * is unit tested directly. This class is the thin part that couldn't be build-verified in this
  * sandbox: there's no simulated CAN bus to open a stream session against, so neither the
- * constructor nor {@link #poll()} has run against a real HAL. See core-integration/README.md.
+ * constructor nor {@link #poll()} has run against a real HAL sim -- though the overflow crash
+ * above confirms both run against a real one. See core-integration/README.md.
  */
 public class RioBridgeCan implements AutoCloseable {
   private final int sessionHandle;
@@ -48,9 +66,12 @@ public class RioBridgeCan implements AutoCloseable {
     try {
       messagesRead = CANJNI.readCANStreamSession(sessionHandle, scratch, scratch.length);
     } catch (CANStreamOverflowException overflow) {
-      // The session's buffer filled between polls, so some frames were dropped -- exactly the
-      // dropped-frame case ADR-0004 already designs for (it just shows up as a bigger-than-usual
-      // gap between two attitude timestamps). Demux what we did get rather than discarding it.
+      // This catch block is a courtesy, not a safety net -- see the class javadoc. On real
+      // hardware, actually reaching this condition has crashed the whole JVM before this code
+      // ever ran, at the native layer that's supposed to construct the exception in the first
+      // place. If you're seeing this catch actually execute, either that native bug got fixed
+      // upstream, or you got lucky on timing -- don't take it as confirmation this is safe to
+      // rely on. Demux what we did get rather than discarding it, same as ADR-0004 intends.
       received = overflow.getMessages();
       messagesRead = overflow.getMessagesRead();
       overflowCount++;
@@ -63,8 +84,11 @@ public class RioBridgeCan implements AutoCloseable {
   /**
    * How many times {@link #poll()} has hit {@link CANStreamOverflowException} -- i.e. this
    * session's buffer filled between two polls and at least one frame was dropped before being
-   * read. Should stay at 0 in normal operation; a nonzero, growing count is the direct answer to
-   * whether the shared SPI master (README's "to verify" item 3) is keeping up. See
+   * read. Must stay at 0: this isn't "a nonzero count means dropped data," it's "a nonzero count
+   * means you got lucky that this didn't crash the JVM instead" -- see the class javadoc. A
+   * nonzero, growing count is still the direct answer to whether the shared SPI master (README's
+   * "to verify" item 3) is keeping up, but the goal on real hardware is never seeing it move off
+   * 0 in the first place, not handling it gracefully when it does. See
    * docs/hardware-verification.md.
    */
   public int overflowCount() {

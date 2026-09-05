@@ -40,16 +40,23 @@ build uses) rather than guessing a `ModuleIO` shape here.
 
 ```java
 // Wherever your drive subsystem is constructed, e.g. RobotContainer:
-RioBridgeCan rioBridgeCan = new RioBridgeCan(CANPort.CAN_S1, /* maxMessagesPerPoll= */ 32);
+RioBridgeCan rioBridgeCan = new RioBridgeCan(CANPort.CAN_S1, /* maxMessagesPerPoll= */ 1024);
 GyroIO gyroIO = new GyroIORioBridge(rioBridgeCan);
 // ... and wire rioBridgeCan.latestEncoders() into your ModuleIOs, per above.
 ```
 
 `CANPort.CAN_S1` matches the root README's topology (RioBridge on HAT channel 1); use whichever
-port your wiring actually uses. `maxMessagesPerPoll` just needs to comfortably exceed the number
-of RioBridge frames arriving between two calls to `updateInputs` -- at the drive loop's usual 50
-Hz against a 100 Hz Attitude frame plus a 20 Hz Status frame, that's at most 3 messages per period;
-32 is generous headroom, not a tuned value.
+port your wiring actually uses. **`maxMessagesPerPoll` is a hard requirement to size generously,
+not a nice-to-have** -- see `RioBridgeCan`'s class javadoc: an actual buffer overflow crashes the
+JVM outright on real hardware (a real, confirmed native bug in this WPILib build's HAL JNI layer,
+not something this repo's code can catch around). At the drive loop's usual 50 Hz against a
+100 Hz Attitude frame plus a 20 Hz Status frame, steady-state is at most 3 messages per period,
+but the number that matters is the worst case if a poll is ever delayed -- exactly what the root
+README's "to verify" item 3 exists to check -- not the typical case. 1024 is ~4.6 seconds of
+headroom at the protocol's full ~220 frames/sec, deliberately generous. Also construct this right
+before you start polling it, not long before (e.g. not as a field initializer if your constructor
+does other slow work first) -- a session sitting open and unpolled is exactly how the real crash
+this warning is based on happened.
 
 ## Diagnostics
 

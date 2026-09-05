@@ -138,7 +138,12 @@ are in [docs/hardware-verification.md](docs/hardware-verification.md).
    roboRIO's internal terminator and the HAT channel 1 terminator are present and in circuit
    together. See [docs/hardware-verification.md](docs/hardware-verification.md) item 2.
 3. MCP2515 RX headroom at 100 Hz with bus 0 loaded — both HAT channels share the Pi's SPI master,
-   so watch `getCANStatus` counters on both buses.
+   so watch `getCANStatus` counters on both buses. **A real overflow here crashes the JVM
+   outright on real hardware**, confirmed via a genuine native bug in this WPILib build's HAL JNI
+   layer (`CANStreamOverflowException` segfaults while being constructed, before any Java `catch`
+   runs) — not something fixable from this repo, only avoidable by buffering generously. See
+   `RioBridgeCan`'s class javadoc and [docs/hardware-verification.md](docs/hardware-verification.md)
+   item 3.
 4. All four encoders are on onboard analog channels, none on MXP analog. `rio-bridge/`'s encoder
    channel list has a `TODO` at this exact point.
 5. AdvantageKit alpha-4 builds against WPILib **alpha-7** on the clone — this is now a version
