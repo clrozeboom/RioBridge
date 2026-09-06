@@ -16,7 +16,7 @@ public interface GyroIO {
   /** Mutable inputs struct; a real project would put {@code @AutoLog} on this. */
   class GyroIOInputs {
     public boolean connected = false;
-    public Rotation2d yawPosition = Rotation2d.ZERO;
+    public Rotation2d yawPosition = Rotation2d.kZero;
     public double yawVelocityRadPerSec = 0.0;
     public double[] odometryYawTimestamps = new double[0];
     public Rotation2d[] odometryYawPositions = new Rotation2d[0];

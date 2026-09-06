@@ -129,6 +129,7 @@ project instead:
 | `RobotBase.startRobot(Robot.class)` | Only the `Supplier<T>` overload exists now -- `RobotBase.startRobot(Robot::new)` | both |
 | `org.wpilib.smartdashboard.SendableChooser` / `SmartDashboard.putData` | **Removed outright** -- the `smartdashboard` package at alpha-7 only has `Field2d`/`Mechanism2d` and friends. Wherever autonomous-chooser-on-the-dashboard moved to, it's not there; this example just hardcodes its one auto routine instead of chasing it down (out of scope here) | both |
 | `abstract class Mechanism` (`extends Mechanism`) | `interface Mechanism` (`implements Mechanism`) | v3 only -- `command2`'s `SubsystemBase` stayed a class |
+| `Rotation2d.kZero` | `Rotation2d.ZERO` (renamed) | both -- found retargeting `core-integration/`'s `GyroIO.java` back to alpha-6 for this repo's alpha-6 release; confirmed by decompiling both jars, not guessed |
 
 If you're updating `BobCat-SystemCore-Clone`'s own examples to alpha-7, expect to hit at least the
 first four regardless of which command framework they're on.

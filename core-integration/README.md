@@ -15,11 +15,13 @@ root package differs):
 - `frc/robot/protocol/` -- `CanIds`/`CanFrames`. Byte-for-byte identical to
   `../rio-bridge/src/main/java/frc/robot/protocol/`; keep both in sync if you change either.
 - `frc/robot/subsystems/drive/riobridge/`:
-  - `RioBridgeCan` -- owns the one CAN stream session for all three RioBridge frames. Construct
-    **one** per robot and share it between `GyroIORioBridge` and whatever reads the encoders (see
-    below) -- don't open a second session. Its `overflowCount()` is the direct signal for "to
-    verify" item 3 (RX headroom) -- see `docs/hardware-verification.md`.
-  - `RioBridgeCanDemux` -- the actual frame demux/decode logic, JNI-free and unit tested.
+  - `RioBridgeCan` -- owns the one CAN device handle for all three RioBridge frames, read via the
+    per-device `CAN`/`CANReceiveMessage` API (not a buffered stream session -- see its class
+    javadoc for why). Construct **one** per robot and share it between `GyroIORioBridge` and
+    whatever reads the encoders (see below) -- don't open a second handle. Its
+    `malformedFrameCount()` is the direct signal for "to verify" item 3 (RX headroom) -- see
+    `docs/hardware-verification.md`.
+  - `RioBridgeCanDemux` -- the actual frame decode logic, JNI-free and unit tested.
   - `AttitudeSample` -- one decoded Attitude frame with its Core-side timestamp.
   - `GyroIO` / `GyroIORioBridge` -- if your project already has a `GyroIO` interface (it does, if
     it started from an AdvantageKit swerve template, which is what the root README targets), skip
@@ -40,23 +42,22 @@ build uses) rather than guessing a `ModuleIO` shape here.
 
 ```java
 // Wherever your drive subsystem is constructed, e.g. RobotContainer:
-RioBridgeCan rioBridgeCan = new RioBridgeCan(CANPort.CAN_S1, /* maxMessagesPerPoll= */ 1024);
+RioBridgeCan rioBridgeCan = new RioBridgeCan(CANBusMap.CAN_S1);
 GyroIO gyroIO = new GyroIORioBridge(rioBridgeCan);
 // ... and wire rioBridgeCan.latestEncoders() into your ModuleIOs, per above.
 ```
 
-`CANPort.CAN_S1` matches the root README's topology (RioBridge on HAT channel 1); use whichever
-port your wiring actually uses. **`maxMessagesPerPoll` is a hard requirement to size generously,
-not a nice-to-have** -- see `RioBridgeCan`'s class javadoc: an actual buffer overflow crashes the
-JVM outright on real hardware (a real, confirmed native bug in this WPILib build's HAL JNI layer,
-not something this repo's code can catch around). At the drive loop's usual 50 Hz against a
-100 Hz Attitude frame plus a 20 Hz Status frame, steady-state is at most 3 messages per period,
-but the number that matters is the worst case if a poll is ever delayed -- exactly what the root
-README's "to verify" item 3 exists to check -- not the typical case. 1024 is ~4.6 seconds of
-headroom at the protocol's full ~220 frames/sec, deliberately generous. Also construct this right
-before you start polling it, not long before (e.g. not as a field initializer if your constructor
-does other slow work first) -- a session sitting open and unpolled is exactly how the real crash
-this warning is based on happened.
+`CANBusMap.CAN_S1` matches the root README's topology (RioBridge on HAT channel 1); use whichever
+bus your wiring actually uses. It's a raw HAL bus id (`int`), not a `CANPort` -- `CANPort` doesn't
+exist at this project's alpha-6 WPILib pin; see `RioBridgeCan`'s class javadoc for why that's fine
+(`CANBusMap` has the exact same values as plain `int` constants).
+
+There's no `maxMessagesPerPoll` to size here, unlike an earlier, stream-session-based version of
+this class -- `readPacketLatest` has no buffered session to size, just a single cached packet per
+API ID (see `RioBridgeCan`'s class javadoc for what that trades away, and why it's confirmed
+working on real hardware regardless). Construction order no longer matters for the reason it used
+to (there's no session to overflow if left open-but-unpolled), but there's no reason to
+reintroduce a field initializer that does slow work first either.
 
 ## Diagnostics
 
@@ -67,15 +68,13 @@ procedure, pass criteria, and how to read the output: [docs/hardware-verificatio
 
 ## What's verified
 
-Everything here compiles and its tests pass against the **real 2027.0.0-alpha-7 org.wpilib jars**
+Everything here compiles and its tests pass against the **real 2027.0.0-alpha-6 org.wpilib jars**
 (`org.wpilib.wpilibj`, `org.wpilib.wpimath`, `org.wpilib.hal`, `org.wpilib.wpiutil`) -- the root
-README's stated Core hardware now matches (updated from alpha-6, which is no longer resolvable
-from frcmaven; 2027 alphas get overwritten there rather than retained). Not verified: whether
-AdvantageKit alpha-4 -- also cited in the root README, and presumably tested against alpha-6, not
-alpha-7 -- still builds against this newer WPILib; this directory doesn't depend on AdvantageKit
-at all, so that pairing was never exercised here. `./gradlew test`: 21 tests --
-`CanFramesTest` (wire format, shared with rio-bridge/), `RioBridgeCanDemuxTest` (frame demux,
-built from hand-constructed `CANStreamMessage`s), and `TimestampUnitsCheckTest` /
+README's stated Core hardware, and (unlike an earlier `alpha-7` detour this repo took and then
+backed out of, see the root README's "Hardware this was designed against") the same version
+AdvantageKit alpha-4 is confirmed to actually build and run against, not just presumed to. `./gradlew
+test`: 24 tests -- `CanFramesTest` (wire format, shared with rio-bridge/), `RioBridgeCanDemuxTest`
+(frame decode, built from hand-constructed `CANReceiveMessage`s), and `TimestampUnitsCheckTest` /
 `BusHealthMonitorTest` (the diagnostics' own classification logic).
 
 **Note for your own project:** the 2027 alpha jars are compiled for Java 25 (class file major
@@ -85,23 +84,40 @@ Foojay resolver if none is found locally; if your Core project targets an older 
 you'll hit the same `class file has wrong version` error these files did until you do the same
 (or your project's WPILib version already forces this and you won't need to do anything).
 
-**Not verified against real hardware or the desktop HAL sim in this exact, alpha-7 form:**
-`RioBridgeCan.poll()` and its constructor, and everything in `diagnostics/` that calls `CANJNI`
-directly, still haven't run as the code sitting in this directory -- there's no simulated CAN bus
-in this sandbox to open a stream session or query bus status against. But the identical design,
-hand-ported to a real alpha-6-pinned robot project
+**Not verified against real hardware or the desktop HAL sim in this exact copy of the files:**
+`RioBridgeCan.poll()` and its constructor, and everything in `diagnostics/` that calls `CANJNI` or
+`CANAPIJNI` directly, still haven't run as the code sitting in this directory -- there's no
+simulated CAN bus in this sandbox to query against. But this exact *design* -- not this exact copy
+of the files -- has: it was hand-ported to a real alpha-6-pinned robot project
 ([clrozeboom/NerdSwerveYAGSL2026](https://github.com/clrozeboom/NerdSwerveYAGSL2026)'s
-`claude/riobridge-core-integration` branch), *has* run on real hardware -- see the two findings
-below, both of which came from that run and are already applied here.
+`claude/riobridge-core-integration` branch), deployed to a real SystemCore, and drove a real
+swerve robot's gyro and encoders through autonomous and teleop -- see the findings below, all of
+which came from that run and are already applied here.
 
-**`CANStreamMessage.timestamp`'s units: resolved, not just less uncertain.** The root README's
-"To verify" list used to flag this as ambiguous between the field's own javadoc (milliseconds,
-`CLOCK_MONOTONIC`) and `setStreamData`'s parameter javadoc (nanoseconds) -- *on the same class*,
-in the real alpha-7 source. Neither was right: a real `TimestampUnitsCheck` run measured
-`secondsPerUnit ~= 1e-6` (wall-clock elapsed=1.946s against a raw timestamp delta of 1,950,175
-over 40 Status frames at 20 Hz) -- **microseconds**. `RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is
-`1.0 / 1_000_000.0` now, not the milliseconds guess it shipped with; see its class javadoc and
-[docs/hardware-verification.md](../docs/hardware-verification.md) item 1.
+**The whole design moved off the buffered CAN stream session -- the single biggest finding.**
+`RioBridgeCan` originally used `CANJNI.openCANStreamSession`/`readCANStreamSession` with
+`CANStreamMessage`. On real hardware, that API never marshaled payload bytes back to Java at all
+-- `.length` read 0 on essentially every real frame, at a rate matching the protocol's entire
+combined send rate (~220/sec), not an occasional glitch. `RioBridgeCan` now reads each frame on
+its own API ID via the older, non-streaming, per-device `CAN`/`CANReceiveMessage` API instead --
+confirmed on the same real hardware to marshal payload bytes correctly. See `RioBridgeCan`'s class
+javadoc and [docs/wpilib-bug-report-can-stream-payload.md](../docs/wpilib-bug-report-can-stream-payload.md)
+for the full drafted bug report. The same stream session also hit a separate, genuine JVM segfault
+in its overflow-handling path (`CANStreamOverflowException` null-derefs while being constructed);
+moving off it sidesteps that risk entirely too, since there's no buffered session left to overflow.
+The tradeoff: no true per-sample buffering anymore, only "the single latest packet per API ID" --
+see `RioBridgeCan`'s class javadoc for what that costs.
+
+**`CANReceiveMessage.timestamp`'s units: resolved, and now confirmed two ways.** The root README's
+"To verify" list used to flag this as ambiguous, in the *stream* API's `CANStreamMessage`, between
+the field's own javadoc (milliseconds, `CLOCK_MONOTONIC`) and `setStreamData`'s parameter javadoc
+(nanoseconds) -- on the same class. Neither was right: a real `TimestampUnitsCheck` run (which
+still uses the stream API deliberately -- see its class javadoc for why that's safe) measured
+`secondsPerUnit ~= 1e-6` (wall-clock elapsed=1.946s against a raw timestamp delta of 1,950,175 over
+40 Status frames at 20 Hz) -- **microseconds**. `CANReceiveMessage.timestamp`'s own javadoc
+independently says "in microseconds (wpi time)," unambiguously, confirming the same answer a
+second way. `RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is `1.0 / 1_000_000.0`; see its class javadoc
+and [docs/hardware-verification.md](../docs/hardware-verification.md) item 1.
 
 **`BusHealthMonitor`/`DiagnosticsRobot` needed a resilience fix, found by the same run.**
 `CANJNI.getCANStatus` threw a `HalHandleException` querying the drivetrain bus specifically --

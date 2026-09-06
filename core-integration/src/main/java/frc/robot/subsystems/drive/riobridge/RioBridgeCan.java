@@ -4,102 +4,105 @@ import frc.robot.protocol.CanFrames.EncodersFrame;
 import frc.robot.protocol.CanFrames.StatusFrame;
 import frc.robot.protocol.CanIds;
 import java.util.List;
-import org.wpilib.hardware.bus.CANPort;
-import org.wpilib.hardware.hal.can.CANJNI;
-import org.wpilib.hardware.hal.can.CANStreamMessage;
-import org.wpilib.hardware.hal.can.CANStreamOverflowException;
+import org.wpilib.hardware.bus.CAN;
+import org.wpilib.hardware.hal.can.CANReceiveMessage;
 
 /**
- * Owns the RioBridge's single CAN stream session (README.md: "The Core reads every frame with a
- * single buffered, timestamped stream session"). Construct one per robot and share it with
- * whatever reads the encoders (see {@link #latestEncoders()}) as well as {@link
- * GyroIORioBridge} -- don't open a second session.
+ * Owns the RioBridge's CAN reads: one {@link CAN} device handle for the RioBridge's own device
+ * identity (bus + device ID + manufacturer + device type), read per frame type via {@code
+ * readPacketLatest} -- not the buffered stream session the original (alpha-7-targeted) design
+ * used. Construct one per robot and share it with whatever reads the encoders (see {@link
+ * #latestEncoders()}) as well as {@link GyroIORioBridge} -- don't open a second handle.
  *
- * <p><b>An actual buffer overflow crashes the JVM on real hardware -- confirmed, not
- * theoretical.</b> {@link #poll}'s {@code catch (CANStreamOverflowException)} below was written
- * assuming ADR-0004's "a dropped frame is fine, the protocol tolerates it" story, the same way a
- * missed UDP packet would be. That's wrong for this specific exception on this WPILib build: a
- * real overflow (an alpha-6-pinned {@code DiagnosticsRobot} left its own session unpolled for
- * ~2.8s while transmitting at ~220 frames/sec, far past its old 32-message buffer) segfaulted
- * before the catch block ever ran -- {@code SIGSEGV}, {@code SEGV_MAPERR}, address {@code 0x0},
- * inside {@code wpi::hal::ThrowCANStreamOverflowException}'s call to {@code JNIEnv_::NewObject}
- * in {@code libwpiHaljni.so}, called from {@code CANJNI.readCANStreamSession}. The native code
- * that's supposed to construct and throw this exception null-derefs instead, so nothing in Java
- * -- no try/catch here or anywhere else -- ever gets a chance to run. That makes avoiding a real
- * overflow a hard requirement, not a nice-to-have: size {@code maxMessagesPerPoll} generously
- * (comfortably above frames-per-second times the longest realistic gap between polls, not just
- * the steady-state case) and never construct a session long before you start polling it, the way
- * {@code DiagnosticsRobot} used to. {@link #overflowCount()} should read as "this never actually
- * happened," not "this happened and got handled."
+ * <p><b>Why this exists: the stream session API never delivered payload data on real hardware.</b>
+ * The previous version of this class used {@code CANJNI.openCANStreamSession}/{@code
+ * readCANStreamSession} with {@code CANStreamMessage} (see git history). That populated {@code
+ * CANStreamMessage.timestamp}/{@code .messageId} correctly but {@code .length} was 0 on
+ * essentially every real frame -- confirmed on real hardware at a rate matching the protocol's
+ * entire combined frame rate (~220/sec), not an occasional glitch: a malformed-frame counter
+ * climbed in lockstep with the expected frame rate while the Attitude frame count stayed at 0. See
+ * {@code docs/wpilib-bug-report-can-stream-payload.md} for the full drafted bug report, including
+ * a separate, genuine JVM segfault the stream session's overflow path hit along the way
+ * (`CANStreamOverflowException` null-derefs while being constructed, before any Java `catch`
+ * could run) -- a second reason to prefer this design even setting the payload bug aside.
  *
- * <p>The actual demux/decode logic lives in {@link RioBridgeCanDemux}, which has no JNI in it and
- * is unit tested directly. This class is the thin part that couldn't be build-verified in this
- * sandbox: there's no simulated CAN bus to open a stream session against, so neither the
- * constructor nor {@link #poll()} has run against a real HAL sim -- though the overflow crash
- * above confirms both run against a real one. See core-integration/README.md.
+ * <p>This class is the fix: the older, non-streaming, per-device {@code CAN}/{@code CANAPIJNI}
+ * API instead of the buffered stream session -- a structurally different native code path
+ * (device-scoped {@code readCANPacketLatest} rather than a shared, mask-filtered stream buffer).
+ * <b>Confirmed working on real hardware:</b> this exact design, hand-ported to a real
+ * alpha-6-pinned robot project
+ * ([clrozeboom/NerdSwerveYAGSL2026](https://github.com/clrozeboom/NerdSwerveYAGSL2026)), was
+ * deployed to a real SystemCore and drove a real swerve robot's gyro and encoders -- the
+ * malformed-frame counter stayed at 0 and Attitude samples came back nonzero (~50/sec, not
+ * ~100/sec -- expected, not a regression; see below), across autonomous and teleop runs. So the
+ * payload-marshaling gap really was specific to the stream session API -- this per-device API
+ * marshals payload bytes correctly on the same platform, same WPILib version, same hardware.
+ *
+ * <p><b>What this loses versus the stream session design: true per-sample buffering.</b> {@code
+ * readPacketLatest} only ever returns the single most recent packet for a given API ID -- there's
+ * no history of every sample received between two polls, unlike a buffered stream session sized
+ * generously enough to hold them all. {@link #drainAttitudeSamples()} keeps the same {@code List}
+ * shape the old stream-session design returned (so {@link GyroIORioBridge} needed no changes), but
+ * expect it to hold 0 or 1 elements per call now, not several: a caller polling a 100 Hz Attitude
+ * frame at {@code TimedRobot}'s 50 Hz default period structurally cannot observe more than 50
+ * distinct samples/sec no matter how well everything else is working, confirmed on real hardware
+ * landing right at that ceiling. That is a real loss of resolution against the design's original
+ * intent -- see {@code RioBridgeCanDemux}'s class javadoc for exactly how the dedup that produces
+ * it works.
+ *
+ * <p>{@link CANReceiveMessage#timestamp}'s javadoc is unambiguous -- "Timestamp message was
+ * received, in microseconds (wpi time)" -- unlike {@code CANStreamMessage}'s self-contradicting
+ * one, and matches the microsecond measurement {@code TimestampUnitsCheck} already confirmed
+ * against the stream API, so {@link RioBridgeCanDemux}'s timestamp scaling carries over unchanged.
  */
 public class RioBridgeCan implements AutoCloseable {
-  private final int sessionHandle;
-  private final CANStreamMessage[] scratch;
+  private final CAN can;
+  private final CANReceiveMessage statusMessage = new CANReceiveMessage();
+  private final CANReceiveMessage encodersMessage = new CANReceiveMessage();
+  private final CANReceiveMessage attitudeMessage = new CANReceiveMessage();
   private final RioBridgeCanDemux demux = new RioBridgeCanDemux();
-  private int overflowCount = 0;
 
-  public RioBridgeCan(CANPort bus, int maxMessagesPerPoll) {
-    sessionHandle =
-        CANJNI.openCANStreamSession(
-            bus.value, CanIds.STATUS_ARBITRATION_ID, CanIds.STREAM_MASK, maxMessagesPerPoll);
-    scratch = new CANStreamMessage[maxMessagesPerPoll];
-    for (int i = 0; i < scratch.length; i++) {
-      scratch[i] = new CANStreamMessage();
-    }
+  /**
+   * @param bus a raw HAL bus id, e.g. {@code org.wpilib.hardware.hal.CANBusMap.CAN_S1} -- not a
+   *     {@code CANPort}, which doesn't exist at this project's now-current alpha-6 WPILib pin (see
+   *     core-example-rev/README.md's "Using WPILib alpha-6 instead" for why that's fine: {@code
+   *     CANBusMap} has the exact same values as plain {@code int} constants).
+   */
+  public RioBridgeCan(int bus) {
+    can = new CAN(bus, CanIds.DEVICE_NUMBER, CAN.TEAM_MANUFACTURER, CAN.TEAM_DEVICE_TYPE);
   }
 
   @Override
   public void close() {
-    CANJNI.closeCANStreamSession(sessionHandle);
+    can.close();
   }
 
-  /** Reads and demultiplexes every frame the session has buffered since the last call. */
+  /** Reads the latest cached packet for each of the RioBridge protocol's three frames. */
   public void poll() {
-    CANStreamMessage[] received = scratch;
-    int messagesRead;
-    try {
-      messagesRead = CANJNI.readCANStreamSession(sessionHandle, scratch, scratch.length);
-    } catch (CANStreamOverflowException overflow) {
-      // This catch block is a courtesy, not a safety net -- see the class javadoc. On real
-      // hardware, actually reaching this condition has crashed the whole JVM before this code
-      // ever ran, at the native layer that's supposed to construct the exception in the first
-      // place. If you're seeing this catch actually execute, either that native bug got fixed
-      // upstream, or you got lucky on timing -- don't take it as confirmation this is safe to
-      // rely on. Demux what we did get rather than discarding it, same as ADR-0004 intends.
-      received = overflow.getMessages();
-      messagesRead = overflow.getMessagesRead();
-      overflowCount++;
+    if (can.readPacketLatest(CanIds.STATUS_API_ID, statusMessage)) {
+      demux.acceptStatus(statusMessage);
     }
-    for (int i = 0; i < messagesRead; i++) {
-      demux.accept(received[i]);
+    if (can.readPacketLatest(CanIds.ENCODERS_API_ID, encodersMessage)) {
+      demux.acceptEncoders(encodersMessage);
+    }
+    if (can.readPacketLatest(CanIds.ATTITUDE_API_ID, attitudeMessage)) {
+      demux.acceptAttitude(attitudeMessage);
     }
   }
 
   /**
-   * How many times {@link #poll()} has hit {@link CANStreamOverflowException} -- i.e. this
-   * session's buffer filled between two polls and at least one frame was dropped before being
-   * read. Must stay at 0: this isn't "a nonzero count means dropped data," it's "a nonzero count
-   * means you got lucky that this didn't crash the JVM instead" -- see the class javadoc. A
-   * nonzero, growing count is still the direct answer to whether the shared SPI master (README's
-   * "to verify" item 3) is keeping up, but the goal on real hardware is never seeing it move off
-   * 0 in the first place, not handling it gracefully when it does. See
-   * docs/hardware-verification.md.
+   * Always 0. This implementation has no buffered session -- {@code readPacketLatest} just
+   * overwrites a single cached packet per API ID, so there's nothing to overflow. Kept so existing
+   * callers (e.g. diagnostics printing) built against the stream-session version of this class
+   * don't need an unrelated code path removed.
    */
   public int overflowCount() {
-    return overflowCount;
+    return 0;
   }
 
   /**
-   * How many messages {@link #poll()} has received that matched one of the RioBridge protocol's
-   * three arbitration IDs but weren't actually shaped like that frame -- see {@link
-   * RioBridgeCanDemux}'s class javadoc for the confirmed-on-real-hardware case this guards
-   * against. Should stay at 0.
+   * How many messages {@link #poll()} has received that didn't unpack as their expected frame --
+   * see {@link RioBridgeCanDemux}'s class javadoc. Should stay at 0.
    */
   public int malformedFrameCount() {
     return demux.malformedFrameCount();
@@ -131,8 +134,10 @@ public class RioBridgeCan implements AutoCloseable {
   }
 
   /**
-   * Every Attitude sample received since the last call, oldest first, for AdvantageKit's
-   * per-sample odometry arrays. Call once per {@code updateInputs} -- this drains the buffer.
+   * Every distinct Attitude sample received since the last call, oldest first, for AdvantageKit's
+   * per-sample odometry arrays. Call once per {@code updateInputs} -- this drains the buffer. See
+   * class javadoc: expect 0 or 1 elements per call now, not several -- a real, accepted loss of
+   * resolution against the previous stream-session design's true multi-sample buffering.
    */
   public List<AttitudeSample> drainAttitudeSamples() {
     return demux.drainAttitudeSamples();

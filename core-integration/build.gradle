@@ -8,6 +8,14 @@ plugins {
 
 repositories {
     mavenCentral()
+    // frcmaven's normal "release" repo only lists the latest 2027 alpha in its metadata (older
+    // ones get overwritten there); "release-2027" is the year-frozen mirror that still serves
+    // alpha-4 through the current alpha-6 target in full -- confirmed in core-example-rev/README.md
+    // ("Using WPILib alpha-6 instead"). Needed here specifically because this is a plain
+    // java-library with explicit repo declarations, not a GradleRIO project -- GradleRIO resolves
+    // release-2027 automatically for a pinned alpha-6 plugin version, but that trick is the
+    // GradleRIO plugin's own behavior, not something this build gets for free.
+    maven { url = "https://frcmaven.wpi.edu/artifactory/release-2027" }
     maven { url = "https://frcmaven.wpi.edu/artifactory/release" }
 }
 
@@ -20,12 +28,16 @@ java {
     }
 }
 
-// README.md's stated Core hardware, updated to match this: alpha-6 (the original target) is no
-// longer resolvable from frcmaven -- 2027 alpha versions get overwritten there rather than kept
-// -- so this moved to alpha-7, the latest available as of this writing. Match whatever your
-// SystemCore project is actually pinned to; if a newer 2027 alpha exists by the time you read
-// this, bump it and re-run `./gradlew test` before trusting anything against the new version.
-def wpilibVersion = "2027.0.0-alpha-7"
+// README.md's stated Core hardware: back on alpha-6, this repo's original target. A brief
+// detour to alpha-7 (see git history / the claude/mattpocock-skills-plan-j0a909 branch) turned
+// out not to be required -- alpha-6 was never actually blocked from frcmaven the way that detour
+// assumed (see the "release-2027" repo above), and this is the version actually confirmed
+// end-to-end on real hardware: the design here was hand-ported to a real alpha-6-pinned robot
+// project (clrozeboom/NerdSwerveYAGSL2026) and driven a real swerve robot with live gyro and
+// encoder data. Match whatever your SystemCore project is actually pinned to; if you're on a
+// newer 2027 alpha, bump this and re-run `./gradlew test` before trusting anything against it --
+// the alpha-7 exploration above found real API differences (see core-example-rev/README.md).
+def wpilibVersion = "2027.0.0-alpha-6"
 
 dependencies {
     implementation "org.wpilib.wpilibj:wpilibj-java:${wpilibVersion}"

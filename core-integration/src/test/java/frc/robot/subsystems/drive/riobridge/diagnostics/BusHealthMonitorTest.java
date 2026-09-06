@@ -5,12 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import frc.robot.subsystems.drive.riobridge.diagnostics.BusHealthMonitor.BusReading;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
 
 /** Exercises {@link BusHealthMonitor#regressed} directly, with hand-built readings. */
 class BusHealthMonitorTest {
   private static BusReading reading(int busOff, int txFull, int rxErr, int txErr) {
-    return new BusReading(CANPort.CAN_S1, 0.0, busOff, txFull, rxErr, txErr);
+    return new BusReading("CAN_S1", 0.0, busOff, txFull, rxErr, txErr);
   }
 
   @Test

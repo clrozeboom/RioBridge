@@ -8,118 +8,136 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import org.wpilib.hardware.hal.can.CANStreamMessage;
+import org.wpilib.hardware.hal.can.CANReceiveMessage;
 
 /**
- * The RioBridge protocol's demux/decode state: turns received {@link CANStreamMessage}s into the
- * three frame types. Deliberately has no JNI calls in it -- {@link RioBridgeCan} is the thin
- * wrapper that owns the actual CAN stream session and feeds messages in here -- so this class is
- * exercised directly in {@code RioBridgeCanDemuxTest} without a CAN session or the desktop HAL
- * sim.
+ * The RioBridge protocol's decode state: turns a {@link CANReceiveMessage} already known to be a
+ * given frame type (see {@link RioBridgeCan#poll()}, which reads each frame on its own API ID)
+ * into that frame's typed value. Deliberately has no JNI in it -- {@link CANReceiveMessage} is a
+ * plain field holder ({@code setReceiveData} exists so JNI can populate one, but nothing stops
+ * test code from calling it directly) -- so this class is exercised in {@code
+ * RioBridgeCanDemuxTest} without a CAN session or the desktop HAL sim, same as before.
  *
- * <p>{@link CANStreamMessage#timestamp}'s unit was genuinely ambiguous from the javadoc alone --
- * the field comment says milliseconds since {@code CLOCK_MONOTONIC}, {@code setStreamData}'s
- * parameter javadoc on the same class says nanoseconds -- and confirmed neither: a real
- * {@code TimestampUnitsCheck} run against real hardware measured {@code secondsPerUnit ~= 1e-6}
- * (wall-clock elapsed=1.946s against a raw timestamp delta of 1,950,175 over 40 Status frames at
- * 20 Hz), which is microseconds. {@link #TIMESTAMP_TO_SECONDS} follows that measurement, not
- * either javadoc.
+ * <p><b>No message-ID dispatch here anymore.</b> The previous, stream-session-based version of
+ * this class matched an incoming {@code CANStreamMessage.messageId} against the three RioBridge
+ * arbitration IDs to decide which frame it was. {@link RioBridgeCan} now reads each frame on its
+ * own API ID via {@code CAN.readPacketLatest(apiId, message)} -- the frame type is already known
+ * by which {@code acceptX} method gets called, so there's nothing left to demux by ID.
  *
- * <p><b>A message can match one of the three arbitration IDs and still not be shaped like that
- * frame -- confirmed on real hardware, and confirmed systemic, not a rare edge case.</b> A live
- * run hit this on essentially every frame (a malformed count climbing by ~220/sec, matching the
- * protocol's entire combined rate, with zero Attitude samples getting through) -- not the
- * occasional bad frame the first sighting looked like. {@link #accept} drops a frame that fails
- * to unpack instead of letting the {@code IllegalArgumentException} escape and kill the whole
- * robot program (the same "don't throw out of a periodic loop" call already made below for an
- * unrecognized arbitration ID entirely), but that's damage control, not a fix -- at this rate,
- * essentially no real RioBridge data is reaching the Core. Leading hypothesis, not yet confirmed:
- * {@code TimestampUnitsCheck} -- the one piece of this whole investigation that has actually
- * worked against a real stream session -- only ever reads {@link CANStreamMessage#timestamp}; it
- * never touches {@code .data}/{@code .length}. {@link RioBridgeCan}'s session is the only code
- * path here that has ever read those two fields from a real session, and it has never once
- * succeeded. That's consistent with this WPILib build's {@code readCANStreamSession} populating
- * timestamp/messageId correctly but not marshaling the payload bytes back to Java at all -- which
- * would make this a structural blocker for the whole design (which depends on reading an 8-byte
- * payload per frame), not a per-frame nuisance. {@link #lastMalformedFrameDescription()} exists
- * to confirm or rule this out on the next run: if {@code dataLength} is consistently 0 across
- * different arbitration IDs and timestamps look sane and increasing, that's the marshaling gap;
- * if lengths vary or timestamps look wrong too, something else is going on. This is the third
- * real, hardware-found rough edge in this exact {@code readCANStreamSession} code path, after the
- * timestamp-unit ambiguity above and {@link RioBridgeCan}'s overflow-segfault.
+ * <p><b>{@code readPacketLatest} returns the same cached packet on every call between real
+ * updates</b> -- confirmed on real hardware (see {@link RioBridgeCan}'s class javadoc). For
+ * Status/Encoders that's harmless: {@code latestStatus()}/{@code latestEncoders()} are meant to
+ * read as "whatever's most recent," and staleness is the caller's concern (e.g. {@code
+ * GyroIORioBridge}'s own threshold). For Attitude it matters: {@link #acceptAttitude} only treats
+ * a reading as a new sample -- i.e. only adds it to {@link #drainAttitudeSamples()} -- when its
+ * timestamp actually moved since the last one accepted, the same dedup {@code RioBridgeCan}'s
+ * NerdSwerveYAGSL2026 counterpart uses. Since {@link RioBridgeCan#poll()} and whatever drains
+ * this each run once per robot loop, this will hold at most one pending sample at a time in
+ * practice -- {@link #drainAttitudeSamples()} still returns a {@code List} (matching the previous
+ * multi-sample-per-poll API so {@code GyroIORioBridge} needed no changes), but a caller polling a
+ * 100 Hz Attitude frame at {@code TimedRobot}'s 50 Hz default period should expect it to hold 0 or
+ * 1 elements per call, not several -- a real, accepted loss of resolution against the old buffered
+ * stream session's true multi-sample capture, for the same reason {@code RioBridgeCan}'s class
+ * javadoc gives.
+ *
+ * <p>{@link CANReceiveMessage#timestamp}'s javadoc is unambiguous -- "Timestamp message was
+ * received, in microseconds (wpi time)" -- so {@link #TIMESTAMP_TO_SECONDS} carries over
+ * unchanged from the stream-session version, which needed a real hardware run to resolve the same
+ * question against {@code CANStreamMessage}'s self-contradicting javadoc (see {@code
+ * TimestampUnitsCheck}).
+ *
+ * <p><b>A message can still come back malformed -- confirmed on real hardware, and the reason this
+ * whole class exists in this shape rather than trusting {@code CanFrames.unpackX} directly.</b>
+ * The previous, stream-session-based {@code RioBridgeCan} hit this at essentially the protocol's
+ * entire combined frame rate (~220/sec), not an occasional glitch -- that turned out to be a
+ * genuine upstream bug specific to {@code readCANStreamSession} never marshaling payload bytes at
+ * all (see {@code RioBridgeCan}'s class javadoc and {@code docs/wpilib-bug-report-can-stream-payload.md}),
+ * which is exactly why {@link RioBridgeCan} moved off that API. This class keeps the same
+ * defensive shape regardless -- drop a frame that fails to unpack instead of letting the {@code
+ * IllegalArgumentException} escape and kill the whole robot program -- since a malformed frame is
+ * cheap to guard against and there's no guarantee some other, not-yet-found rough edge in the new
+ * API couldn't produce one too.
  */
 final class RioBridgeCanDemux {
   private static final double TIMESTAMP_TO_SECONDS = 1.0 / 1_000_000.0;
-
-  /** Strips the CAN JNI's frame-type flag bits (see {@code CANJNI.CAN_IS_FRAME_*}) before
-   *  comparing a received message ID against the 29-bit arbitration IDs in {@link CanIds}. */
-  private static final int ARBITRATION_ID_MASK = 0x1FFFFFFF;
 
   private StatusFrame latestStatus;
   private double latestStatusTimestampSeconds = Double.NEGATIVE_INFINITY;
   private EncodersFrame latestEncoders;
   private double latestEncodersTimestampSeconds = Double.NEGATIVE_INFINITY;
   private AttitudeSample latestAttitude;
+  private double lastSeenAttitudeTimestampSeconds = Double.NEGATIVE_INFINITY;
   private final List<AttitudeSample> pendingAttitudeSamples = new ArrayList<>();
   private int malformedFrameCount = 0;
   private String lastMalformedFrameDescription;
 
-  void accept(CANStreamMessage message) {
-    byte[] data = Arrays.copyOf(message.data, message.length);
-    double timestampSeconds = message.timestamp * TIMESTAMP_TO_SECONDS;
-    int id = message.messageId & ARBITRATION_ID_MASK;
-
+  void acceptStatus(CANReceiveMessage message) {
     try {
-      if (id == CanIds.STATUS_ARBITRATION_ID) {
-        latestStatus = CanFrames.unpackStatus(data);
-        latestStatusTimestampSeconds = timestampSeconds;
-      } else if (id == CanIds.ENCODERS_ARBITRATION_ID) {
-        latestEncoders = CanFrames.unpackEncoders(data);
-        latestEncodersTimestampSeconds = timestampSeconds;
-      } else if (id == CanIds.ATTITUDE_ARBITRATION_ID) {
-        AttitudeSample sample =
-            new AttitudeSample(CanFrames.unpackAttitude(data), timestampSeconds);
-        latestAttitude = sample;
-        pendingAttitudeSamples.add(sample);
-      }
-      // Anything else matched the session's coarse filter without being one of our three frames
-      // -- shouldn't happen given the mask in CanIds, but silently ignoring it is the right
-      // failure mode on an offseason bridge (ADR-0005), not throwing out of a periodic loop.
+      latestStatus = CanFrames.unpackStatus(trim(message));
+      latestStatusTimestampSeconds = message.timestamp * TIMESTAMP_TO_SECONDS;
     } catch (IllegalArgumentException malformed) {
-      // Matched one of our three arbitration IDs but wasn't actually shaped like that frame (see
-      // class javadoc). Drop this one frame and keep the previous latest* value rather than
-      // crash the whole loop over one bad frame; malformedFrameCount/lastMalformedFrameDescription
-      // are the visibility into how often this happens and what the raw message actually looked
-      // like when it did.
-      malformedFrameCount++;
-      lastMalformedFrameDescription =
-          String.format(
-              "arbitrationId=0x%X rawMessageId=0x%X dataLength=%d rawTimestamp=%d: %s",
-              id, message.messageId, message.length, message.timestamp, malformed.getMessage());
+      recordMalformed(CanIds.STATUS_API_ID, message, malformed);
     }
   }
 
+  void acceptEncoders(CANReceiveMessage message) {
+    try {
+      latestEncoders = CanFrames.unpackEncoders(trim(message));
+      latestEncodersTimestampSeconds = message.timestamp * TIMESTAMP_TO_SECONDS;
+    } catch (IllegalArgumentException malformed) {
+      recordMalformed(CanIds.ENCODERS_API_ID, message, malformed);
+    }
+  }
+
+  void acceptAttitude(CANReceiveMessage message) {
+    double timestampSeconds = message.timestamp * TIMESTAMP_TO_SECONDS;
+    if (timestampSeconds == lastSeenAttitudeTimestampSeconds) {
+      return; // Same cached packet as last poll -- not a new sample from the RioBridge.
+    }
+    try {
+      AttitudeSample sample =
+          new AttitudeSample(CanFrames.unpackAttitude(trim(message)), timestampSeconds);
+      lastSeenAttitudeTimestampSeconds = timestampSeconds;
+      latestAttitude = sample;
+      pendingAttitudeSamples.add(sample);
+    } catch (IllegalArgumentException malformed) {
+      // Deliberately still record this as "seen" (lastSeenAttitudeTimestampSeconds isn't
+      // updated above on this path) so a persistently malformed frame at a fixed bad timestamp
+      // doesn't get silently retried as "new" forever -- matches malformedFrameCount's intent of
+      // counting distinct bad frames, not the same one repeatedly.
+      lastSeenAttitudeTimestampSeconds = timestampSeconds;
+      recordMalformed(CanIds.ATTITUDE_API_ID, message, malformed);
+    }
+  }
+
+  private static byte[] trim(CANReceiveMessage message) {
+    return Arrays.copyOf(message.data, message.length);
+  }
+
   /**
-   * How many times {@link #accept} has received a message that matched one of the RioBridge
-   * protocol's three arbitration IDs but failed to unpack as that frame's expected byte length.
-   * Should stay at 0 -- confirmed on real hardware to instead climb at essentially the protocol's
-   * full frame rate (see class javadoc), not the rare one-off this originally looked like. Not a
-   * RioBridge sender-side bug -- {@code CanFrames}' packing methods always emit exactly 8 bytes.
+   * How many times an {@code acceptX} method has received a message for its own API ID that
+   * failed to unpack as that frame's expected byte length. Should stay at 0 -- not a RioBridge
+   * sender-side bug either way, since {@code CanFrames}' packing methods always emit exactly 8
+   * bytes.
    */
   int malformedFrameCount() {
     return malformedFrameCount;
   }
 
   /**
-   * Details of the most recent frame {@link #accept} couldn't unpack, or {@code null} if none
-   * has happened yet. Print this (throttled -- it changes on every malformed frame when they're
-   * frequent) to test the class javadoc's marshaling-gap hypothesis: consistently
-   * {@code dataLength=0} with sane, increasing {@code rawTimestamp} values across different
-   * {@code arbitrationId}s would confirm it; varying lengths or nonsensical timestamps would
-   * point elsewhere instead.
+   * Details of the most recent frame an {@code acceptX} method couldn't unpack, or {@code null}
+   * if none has happened yet.
    */
   String lastMalformedFrameDescription() {
     return lastMalformedFrameDescription;
+  }
+
+  private void recordMalformed(int apiId, CANReceiveMessage message, IllegalArgumentException malformed) {
+    malformedFrameCount++;
+    lastMalformedFrameDescription =
+        String.format(
+            "apiId=0x%X dataLength=%d rawTimestamp=%d: %s",
+            apiId, message.length, message.timestamp, malformed.getMessage());
   }
 
   StatusFrame latestStatus() {
@@ -143,8 +161,9 @@ final class RioBridgeCanDemux {
   }
 
   /**
-   * Every Attitude sample received since the last call, oldest first, for AdvantageKit's
-   * per-sample odometry arrays. Call once per {@code updateInputs} -- this drains the buffer.
+   * Every distinct (by timestamp) Attitude sample accepted since the last call, oldest first, for
+   * AdvantageKit's per-sample odometry arrays. Call once per {@code updateInputs} -- this drains
+   * the buffer. See class javadoc: expect 0 or 1 elements per call in practice now, not several.
    */
   List<AttitudeSample> drainAttitudeSamples() {
     if (pendingAttitudeSamples.isEmpty()) {

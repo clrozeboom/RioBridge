@@ -2,7 +2,7 @@ package frc.robot.subsystems.drive.riobridge.diagnostics;
 
 import frc.robot.subsystems.drive.riobridge.RioBridgeCan;
 import org.wpilib.framework.TimedRobot;
-import org.wpilib.hardware.bus.CANPort;
+import org.wpilib.hardware.hal.CANBusMap;
 import org.wpilib.system.Timer;
 
 /**
@@ -17,28 +17,26 @@ import org.wpilib.system.Timer;
  * RioBridgeCan} and both buses' {@link BusHealthMonitor} counters, printing a line per bus per
  * second and flagging any regression.
  *
- * <p><b>{@link #rioBridgeCan} is constructed after the steps above run, not before -- this
- * crashed the JVM on real hardware when it wasn't.</b> {@code RioBridgeCan}'s session used to be
- * a field initializer, meaning it opened (and started buffering real traffic) before
- * {@link TimestampUnitsCheck#run} even started, and that check alone took ~2.8s wall-clock on
- * real hardware while transmitting at ~220 frames/sec -- nobody was polling the session that
- * whole time, so its old 32-message buffer overflowed by roughly 20x before the first
- * {@link #robotPeriodic} call ever happened. See {@link RioBridgeCan}'s class javadoc for why
- * that overflow crashed the whole program instead of being caught. Constructing it here instead
- * means there's no gap between "session exists" and "something is polling it."
+ * <p><b>{@code attitudeFramesLastSecond} caps at ~50, not ~100, and that's correct.</b> This class
+ * runs at {@code TimedRobot}'s 50 Hz default period, and {@link RioBridgeCan} has no per-sample
+ * buffering (see its class javadoc) -- {@code readPacketLatest} only ever returns whichever single
+ * packet is most recent at the moment of the call. Polling a 100 Hz source at 50 Hz structurally
+ * cannot observe more than 50 distinct samples/sec no matter how well everything else is working;
+ * confirmed on real hardware landing right at that ceiling (consistently ~50-51/sec) once the
+ * payload-marshaling fix below actually worked.
+ *
+ * <p>{@link #rioBridgeCan} is still constructed after the steps above run, not as a field
+ * initializer, matching the previous (stream-session-based) version of this class -- that
+ * ordering was originally needed to avoid a real buffer-overflow crash, which doesn't apply to
+ * this {@code readPacketLatest}-based implementation (see {@code RioBridgeCan}'s class javadoc:
+ * there's no buffered session here to overflow), but there's no reason to reintroduce a field
+ * initializer either.
  */
 public class DiagnosticsRobot extends TimedRobot {
-  private static final CANPort RIOBRIDGE_BUS = CANPort.CAN_S1;
-  private static final CANPort DRIVETRAIN_BUS = CANPort.CAN_S0;
+  private static final int RIOBRIDGE_BUS = CANBusMap.CAN_S1;
+  private static final int DRIVETRAIN_BUS = CANBusMap.CAN_S0;
   private static final double PRINT_INTERVAL_SECONDS = 1.0;
   private static final double TIMESTAMP_CHECK_TIMEOUT_SECONDS = 10.0;
-
-  /**
-   * Generous, not tuned: ~220 frames/sec (20 Hz Status + 100 Hz Encoders + 100 Hz Attitude) times
-   * several seconds of tolerated polling delay, comfortably rounded up. See {@link RioBridgeCan}'s
-   * class javadoc for why headroom here is a hard requirement now, not just nice-to-have.
-   */
-  private static final int MAX_MESSAGES_PER_POLL = 1024;
 
   private final RioBridgeCan rioBridgeCan;
 
@@ -48,8 +46,7 @@ public class DiagnosticsRobot extends TimedRobot {
   private int attitudeFramesSinceLastPrint = 0;
 
   public DiagnosticsRobot() {
-    System.out.println(
-        "=== TimestampUnitsCheck: collecting Status frames on " + RIOBRIDGE_BUS + " ===");
+    System.out.println("=== TimestampUnitsCheck: collecting Status frames on CAN_S1 ===");
     TimestampUnitsCheck.Result result =
         TimestampUnitsCheck.run(RIOBRIDGE_BUS, TIMESTAMP_CHECK_TIMEOUT_SECONDS);
     System.out.printf(
@@ -66,13 +63,11 @@ public class DiagnosticsRobot extends TimedRobot {
         "Command the drivetrain (or otherwise load bus 0) during this run -- an idle bus 0"
             + " doesn't exercise the shared SPI master this is checking.");
 
-    // Opened here, not as a field initializer -- see class javadoc. TimestampUnitsCheck above
-    // uses its own separate, short-lived session; rioBridgeCan itself doesn't exist yet, so
-    // there's nothing of its own accumulating traffic unpolled during that ~2s run.
-    rioBridgeCan = new RioBridgeCan(RIOBRIDGE_BUS, MAX_MESSAGES_PER_POLL);
+    // Opened here, not as a field initializer -- see class javadoc.
+    rioBridgeCan = new RioBridgeCan(RIOBRIDGE_BUS);
 
-    previousDrivetrainReading = sampleSafely(DRIVETRAIN_BUS);
-    previousRioBridgeReading = sampleSafely(RIOBRIDGE_BUS);
+    previousDrivetrainReading = sampleSafely(DRIVETRAIN_BUS, "CAN_S0");
+    previousRioBridgeReading = sampleSafely(RIOBRIDGE_BUS, "CAN_S1");
   }
 
   @Override
@@ -92,16 +87,19 @@ public class DiagnosticsRobot extends TimedRobot {
     }
     nextPrintAt = now + PRINT_INTERVAL_SECONDS;
 
-    BusHealthMonitor.BusReading drivetrain = sampleSafely(DRIVETRAIN_BUS);
-    BusHealthMonitor.BusReading rioBridge = sampleSafely(RIOBRIDGE_BUS);
+    BusHealthMonitor.BusReading drivetrain = sampleSafely(DRIVETRAIN_BUS, "CAN_S0");
+    BusHealthMonitor.BusReading rioBridge = sampleSafely(RIOBRIDGE_BUS, "CAN_S1");
 
     printReading(drivetrain, previousDrivetrainReading);
     printReading(rioBridge, previousRioBridgeReading);
     System.out.printf(
-        "  RioBridgeCan: attitudeFramesLastSecond=%d (expect ~%d at 100 Hz) overflowCount=%d"
+        "  RioBridgeCan: attitudeFramesLastSecond=%d (expect ~%d -- this loop's 50 Hz default"
+            + " period, not the Attitude frame's 100 Hz send rate: readPacketLatest has no"
+            + " buffering, so a 50 Hz poll of a 100 Hz source structurally can't observe more"
+            + " than 50 distinct samples/sec) overflowCount=%d"
             + " malformedFrameCount=%d%s%n",
         attitudeFramesSinceLastPrint,
-        100,
+        50,
         rioBridgeCan.overflowCount(),
         rioBridgeCan.malformedFrameCount(),
         rioBridgeCan.overflowCount() > 0 || rioBridgeCan.malformedFrameCount() > 0
@@ -136,12 +134,12 @@ public class DiagnosticsRobot extends TimedRobot {
    * most exactly when it's the drivetrain bus that's failing, since the RioBridge bus is the one
    * this class's own {@link RioBridgeCan} session already guarantees is touched.
    */
-  private static BusHealthMonitor.BusReading sampleSafely(CANPort bus) {
+  private static BusHealthMonitor.BusReading sampleSafely(int bus, String busName) {
     try {
-      return BusHealthMonitor.sample(bus);
+      return BusHealthMonitor.sample(bus, busName);
     } catch (RuntimeException e) {
       System.out.println(
-          bus
+          busName
               + ": status unavailable ("
               + e.getMessage()
               + "). Likely means this bus isn't brought up on the Core yet, or nothing in this"

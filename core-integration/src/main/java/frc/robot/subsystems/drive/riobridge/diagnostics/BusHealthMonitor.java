@@ -1,6 +1,5 @@
 package frc.robot.subsystems.drive.riobridge.diagnostics;
 
-import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.hardware.hal.can.CANJNI;
 import org.wpilib.hardware.hal.can.CANStatus;
 
@@ -11,24 +10,29 @@ import org.wpilib.hardware.hal.can.CANStatus;
  * <p>Wraps {@code CANJNI.getCANStatus} -- exactly the counters the README names. See
  * docs/hardware-verification.md for how to run this and what the numbers mean;
  * {@link DiagnosticsRobot} is a ready driver for it.
+ *
+ * <p>Takes a raw HAL bus id ({@code int}, e.g. {@code org.wpilib.hardware.hal.CANBusMap.CAN_S1})
+ * plus a caller-supplied name for it, rather than a {@code CANPort} -- {@code CANPort} doesn't
+ * exist at this project's alpha-6 WPILib pin (see {@code RioBridgeCan}'s class javadoc), and
+ * {@code CANJNI.getCANStatus} only ever wanted a raw bus id anyway, at either alpha.
  */
 public final class BusHealthMonitor {
   private BusHealthMonitor() {}
 
   /** One {@code getCANStatus} reading, tagged with which bus it came from. */
   public record BusReading(
-      CANPort bus,
+      String busName,
       double percentBusUtilization,
       int busOffCount,
       int txFullCount,
       int receiveErrorCount,
       int transmitErrorCount) {}
 
-  public static BusReading sample(CANPort bus) {
+  public static BusReading sample(int bus, String busName) {
     CANStatus status = new CANStatus();
-    CANJNI.getCANStatus(bus.value, status);
+    CANJNI.getCANStatus(bus, status);
     return new BusReading(
-        bus,
+        busName,
         status.percentBusUtilization,
         status.busOffCount,
         status.txFullCount,
@@ -52,7 +56,7 @@ public final class BusHealthMonitor {
   public static String describe(BusReading reading) {
     return String.format(
         "%s: util=%.1f%% busOff=%d txFull=%d rxErr=%d txErr=%d",
-        reading.bus(),
+        reading.busName(),
         reading.percentBusUtilization(),
         reading.busOffCount(),
         reading.txFullCount(),

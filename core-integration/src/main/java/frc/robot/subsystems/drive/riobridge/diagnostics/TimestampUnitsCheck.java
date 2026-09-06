@@ -1,7 +1,6 @@
 package frc.robot.subsystems.drive.riobridge.diagnostics;
 
 import frc.robot.protocol.CanIds;
-import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.hardware.hal.can.CANJNI;
 import org.wpilib.hardware.hal.can.CANStreamMessage;
 import org.wpilib.hardware.hal.can.CANStreamOverflowException;
@@ -10,8 +9,19 @@ import org.wpilib.system.Timer;
 /**
  * Root README "to verify" item 1: whether {@code CANStreamMessage.timestamp} is really
  * milliseconds (per the field's own javadoc) or nanoseconds (per {@code setStreamData}'s
- * parameter javadoc, on the same class) -- see {@code RioBridgeCanDemux}'s class javadoc for the
- * exact contradiction in the real alpha-7 source.
+ * parameter javadoc, on the same class) -- confirmed on real hardware to be neither: microseconds
+ * (see the pass criteria in docs/hardware-verification.md).
+ *
+ * <p>This is the one class in this package still using the buffered stream session API ({@code
+ * CANStreamMessage}/{@code readCANStreamSession}) -- {@link
+ * frc.robot.subsystems.drive.riobridge.RioBridgeCan} moved to the per-device {@code CAN}/{@code
+ * CANReceiveMessage} API instead, after the stream session was found to never deliver payload
+ * bytes on real hardware (see its class javadoc). That finding doesn't touch this class: this
+ * only ever reads {@code .timestamp}, never {@code .data}/{@code .length}, which is exactly why
+ * it kept working when {@code RioBridgeCan} didn't. {@code CANJNI.openCANStreamSession}/{@code
+ * readCANStreamSession} are unchanged between alpha-6 (this project's current WPILib pin) and
+ * alpha-7, so this class needed no changes for that move beyond the {@code CANPort -> int} bus
+ * parameter below.
  *
  * <p>Opens its own short-lived stream session filtered to just the Status frame (20 Hz, so a
  * clean ~50 ms period) and compares elapsed raw timestamp against elapsed wall-clock time over
@@ -37,15 +47,17 @@ public final class TimestampUnitsCheck {
   }
 
   /**
-   * @param bus the RioBridge's CAN port, e.g. {@code CANPort.CAN_S1}.
+   * @param bus a raw HAL bus id, e.g. {@code org.wpilib.hardware.hal.CANBusMap.CAN_S1} -- not a
+   *     {@code CANPort}, which doesn't exist at this project's alpha-6 WPILib pin (see {@code
+   *     RioBridgeCan}'s class javadoc for why that's fine).
    * @param timeoutSeconds give up and return a FAILED result after this long even if fewer than
    *     {@link #SAMPLE_COUNT} Status frames arrived (most likely: RioBridge isn't powered, isn't
    *     on this bus, or isn't transmitting).
    */
-  public static Result run(CANPort bus, double timeoutSeconds) {
+  public static Result run(int bus, double timeoutSeconds) {
     int sessionHandle =
         CANJNI.openCANStreamSession(
-            bus.value, CanIds.STATUS_ARBITRATION_ID, /* exact match, no API bits */ 0x1FFFFFFF, 8);
+            bus, CanIds.STATUS_ARBITRATION_ID, /* exact match, no API bits */ 0x1FFFFFFF, 8);
     try {
       return collect(sessionHandle, timeoutSeconds);
     } finally {

@@ -12,15 +12,19 @@ then 5 (build compatibility) whenever is convenient, since it doesn't touch hard
 
 ## 1. `CANStreamMessage.timestamp` units
 
-**Resolved.** `core-integration/`'s own source confirmed the real 2027.0.0-alpha-7 API
-contradicts itself -- the field's javadoc says milliseconds, `setStreamData`'s parameter javadoc
-on the same class says nanoseconds -- and a real run of this exact tool against real hardware
-settled it as neither: `secondsPerUnit ~= 1e-6` (wall-clock elapsed=1.946s against a raw
-timestamp delta of 1,950,175 over 40 Status frames at 20 Hz) is **microseconds**.
-`RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is `1.0 / 1_000_000.0` now, not the milliseconds guess
-it shipped with. The steps below are kept as a runbook for anyone re-verifying this on their own
-hardware (a different Core OS/kernel/HAL build could plausibly differ), not because the answer
-is still open.
+**Resolved, and now confirmed two independent ways.** `core-integration/`'s own source confirmed
+the real WPILib API contradicts itself for the *stream* API's `CANStreamMessage` -- the field's
+javadoc says milliseconds, `setStreamData`'s parameter javadoc on the same class says nanoseconds
+-- and a real run of this exact tool against real hardware settled it as neither: `secondsPerUnit
+~= 1e-6` (wall-clock elapsed=1.946s against a raw timestamp delta of 1,950,175 over 40 Status
+frames at 20 Hz) is **microseconds**. `core-integration/` no longer reads its actual frame data
+through the stream API (see item 3 below), but this tool still deliberately does -- see its class
+javadoc for why that's safe -- so this measurement stays the way to check the unit. The per-device
+API's own `CANReceiveMessage.timestamp` independently documents "in microseconds (wpi time)" in
+its own javadoc, unambiguously, confirming the same answer a second, unrelated way.
+`RioBridgeCanDemux.TIMESTAMP_TO_SECONDS` is `1.0 / 1_000_000.0`. The steps below are kept as a
+runbook for anyone re-verifying this on their own hardware (a different Core OS/kernel/HAL build
+could plausibly differ), not because the answer is still open.
 
 **Tool:** [`TimestampUnitsCheck`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/TimestampUnitsCheck.java),
 driven by [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/DiagnosticsRobot.java)
@@ -115,32 +119,51 @@ There are two stages here, and they answer different questions -- don't stop at 
 
 **What/why:** both HAT channels share the Pi's SPI master. Bus 0 (the drivetrain's SPARK MAXes +
 PDH) is far busier than bus 1 (the RioBridge alone), so the open question is whether reading bus
-1's stream session ever falls behind while bus 0 is being serviced.
+1 ever falls behind while bus 0 is being serviced. **Resolved, and the design changed along the
+way** -- the three findings below drove `core-integration/` off the buffered CAN stream session
+entirely, onto the per-device `CAN`/`CANReceiveMessage` API it uses now. They're kept here as the
+real history, since a project on a different WPILib build might still hit the same stream-session
+bugs if it goes looking for that API instead.
 
-**Falling behind isn't just lossy on this WPILib build -- it crashes the JVM outright, confirmed
-on real hardware.** `RioBridgeCan.poll()`'s `catch (CANStreamOverflowException)` was written
-assuming ADR-0004's "a dropped frame is fine" story. It isn't, for this specific exception: a
-real overflow (an earlier version of `DiagnosticsRobot` left its own session unpolled for ~2.8s
-at ~220 frames/sec, far past its old 32-message buffer) segfaulted the whole JVM --
+**Finding 1 -- falling behind wasn't just lossy on the stream session, it crashed the JVM
+outright.** The original `RioBridgeCan.poll()`'s `catch (CANStreamOverflowException)` was written
+assuming ADR-0004's "a dropped frame is fine" story. It wasn't true for this specific exception: a
+real overflow (an earlier version of `DiagnosticsRobot` left its own session unpolled for ~2.8s at
+~220 frames/sec, far past its old 32-message buffer) segfaulted the whole JVM --
 `SIGSEGV`/`SEGV_MAPERR` at address `0x0`, inside the native code that's supposed to construct and
 throw `CANStreamOverflowException` in the first place (`wpi::hal::ThrowCANStreamOverflowException`
 in `libwpiHaljni.so`, called from `CANJNI.readCANStreamSession`), before any Java `catch` block
-ever got a chance to run. That's a genuine upstream bug, not something fixable from this repo's
-code -- the only mitigation available is never actually triggering a real overflow: size
-`maxMessagesPerPoll` generously (`RioBridgeCan.java` and `DiagnosticsRobot.java` both use 1024
-now, not the original 32) and construct the session right before you start polling it, not long
-before. See `RioBridgeCan`'s class javadoc for the full writeup. This item's whole purpose --
-finding out whether bus 1 ever falls behind under load -- is exactly the scenario that would
-trigger this, so treat any run of this tool as adequately buffered, not as safe to interrupt.
+ever got a chance to run. That's a genuine upstream bug in the stream session specifically, not
+something fixable from this repo's code.
 
-**A frame can also arrive malformed rather than missing entirely -- also confirmed on real
-hardware.** A run hit a message that matched the Encoders arbitration ID with 0 bytes instead of
-the expected 8, which crashed the whole robot program with an uncaught
-`IllegalArgumentException` out of `CanFrames.unpackEncoders`. This is a third real rough edge in
-this exact `readCANStreamSession` code path (after the timestamp-unit ambiguity and the overflow
-segfault, both above) -- `RioBridgeCanDemux.accept` now drops a frame that fails to unpack
-instead of letting the exception escape, tracked via the new `malformedFrameCount`. See
-`RioBridgeCanDemux`'s class javadoc.
+**Finding 2 -- a frame could also arrive malformed rather than missing entirely.** A run hit a
+message that matched the Encoders arbitration ID with 0 bytes instead of the expected 8, which
+crashed the whole robot program with an uncaught `IllegalArgumentException` out of
+`CanFrames.unpackEncoders`.
+
+**Finding 3 -- malformed frames turned out to be the *normal* case for the stream session, not a
+rare edge case, and that's what actually explains Finding 2.** Once malformed frames were caught
+and counted instead of left to crash the program, `malformedFrameCount` climbed at essentially the
+protocol's entire combined send rate (~220/sec) while `attitudeFramesLastSecond` stayed stuck at
+`0` -- not an occasional glitch, but every single frame. Root cause: `readCANStreamSession` never
+marshaled payload bytes (`.data`/`.length`) back to Java at all on this WPILib build, while
+`.timestamp`/`.messageId` came through correctly and consistently the whole time. This is a
+genuine upstream bug, not fixable from this repo's code -- see
+[`docs/wpilib-bug-report-can-stream-payload.md`](wpilib-bug-report-can-stream-payload.md) for the
+full drafted bug report with the original evidence.
+
+**The fix: move off the stream session API entirely.** `RioBridgeCan` now reads each frame on its
+own API ID via the older, non-streaming, per-device `CAN`/`CANReceiveMessage` API --
+`CANReceiveMessage.timestamp`'s own javadoc independently confirms microseconds too (item 1
+above). **Confirmed working on real hardware**: deployed to a real SystemCore,
+`malformedFrameCount` stayed at `0` and previously-stuck-at-0 frame counts came back nonzero,
+across many consecutive one-second windows, driving a real swerve robot's gyro and encoders
+through autonomous and teleop. Since there's no buffered session in this design, Finding 1's crash
+mode structurally can't happen either -- `overflowCount()` is now always `0` by construction, kept
+only so old callers built against the stream-session version of this class don't need an unrelated
+code path removed. The tradeoff: no true per-sample buffering anymore, only the single latest
+packet per API ID -- see `RioBridgeCan`'s class javadoc for what that costs and why it's an
+accepted tradeoff for this project.
 
 **Tool:** [`DiagnosticsRobot`](../core-integration/src/main/java/frc/robot/subsystems/drive/riobridge/diagnostics/DiagnosticsRobot.java)
 -- the same one from item 1; it keeps running after the one-shot timestamp check.
@@ -175,53 +198,38 @@ this process) -- not a RioBridge problem, and not something to debug via this to
    ```
    CAN_S0: util=23.4% busOff=0 txFull=0 rxErr=0 txErr=0
    CAN_S1: util=1.2% busOff=0 txFull=0 rxErr=0 txErr=0
-     RioBridgeCan: attitudeFramesLastSecond=100 (expect ~100 at 100 Hz) overflowCount=0 malformedFrameCount=0
+     RioBridgeCan: attitudeFramesLastSecond=50 (expect ~50 -- this loop's 50 Hz default period, not
+     the Attitude frame's 100 Hz send rate: readPacketLatest has no buffering, so a 50 Hz poll of a
+     100 Hz source structurally can't observe more than 50 distinct samples/sec) overflowCount=0
+     malformedFrameCount=0
    ```
+
+   **`attitudeFramesLastSecond` caps at ~50, not ~100, and that's correct** -- confirmed on real
+   hardware landing right at that ceiling (consistently ~50-51/sec). See `DiagnosticsRobot`'s
+   class javadoc for why: it's a structural consequence of polling a 100 Hz, non-buffered source
+   at `TimedRobot`'s 50 Hz default period, not a regression or a sign anything's wrong.
 
 **Pass criteria, all of these for the whole run:**
 
-- `overflowCount` stays at `0`. Read this one differently from a normal "counts a handled error"
-  metric -- it isn't asking whether drops were survivable, it's the only visibility you have into
-  whether you narrowly avoided the crash described above. Any nonzero value means a real overflow
-  happened and you got lucky it didn't take the JVM down with it; stop and investigate rather than
-  shrugging off "just some drops."
-- `malformedFrameCount` stays at `0`. A nonzero value means a frame arrived matching one of the
-  protocol's three arbitration IDs but not shaped like that frame -- confirmed to happen (see
-  above), cause not fully understood, worth investigating rather than ignoring even though it no
-  longer crashes anything.
-- `attitudeFramesLastSecond` stays close to 100 (a few frames off from jitter is normal; a
-  sustained drop below is a problem even if `overflowCount` hasn't incremented yet).
+- `overflowCount` stays at `0`. Always true by construction now -- there's no buffered session
+  left for this design to overflow (see the findings above) -- but kept as a pass criterion in
+  case you're checking an older, stream-session-based version of this code instead.
+- `malformedFrameCount` stays at `0`. A nonzero value means a frame arrived on one of the
+  protocol's three API IDs but wasn't shaped like that frame's expected 8 bytes. Confirmed to
+  happen at essentially 100% of frames on the old stream-session design (see the findings above);
+  confirmed to stay at 0 on this per-device design across a real autonomous+teleop run. Any
+  nonzero value here now is worth investigating as its own, new finding, not assumed to be the
+  same already-diagnosed bug.
+- `attitudeFramesLastSecond` stays close to 50, not 100 (see above) -- a few frames off from
+  jitter is normal; a sustained drop meaningfully below 50 is a problem.
 - Neither bus shows a `REGRESSED` flag -- i.e. `busOffCount`, `txFullCount`,
   `receiveErrorCount`, and `transmitErrorCount` never increase from one second to the next, on
   either bus.
-- The process is still running at the end of the observation window at all. A crash (not a clean
-  exit) during this run that you didn't cause yourself (killing the deploy, power loss) likely
-  *is* the overflow-segfault above -- check for an `hs_err_pid*.log` on the Core before assuming
-  it's something else.
+- The process is still running at the end of the observation window at all.
 
 **If it fails:** the fix is almost certainly on the Core side (reduce how much else shares the
 SPI master, or how often you poll), not something to change in the RioBridge -- the RioBridge's
-send rates are fixed by the protocol table and ADR-0004's explicit-sends design. If it crashed
-outright rather than reporting a nonzero `overflowCount`, that's the native bug above, not a new
-failure mode to chase separately.
-
-**If `malformedFrameCount` climbs at close to the full ~220/sec combined rate with
-`attitudeFramesLastSecond` stuck at 0** -- confirmed to actually happen, not a hypothetical -- the
-stream session isn't delivering payload bytes at all on this WPILib build, not just occasionally
-corrupting one. That's not something more buffering or defensive code here fixes. See:
-
-- [`docs/wpilib-bug-report-can-stream-payload.md`](wpilib-bug-report-can-stream-payload.md) -- a
-  drafted (not yet filed) bug report with the full evidence, for whoever wants to file it against
-  upstream WPILib.
-- [`clrozeboom/NerdSwerveYAGSL2026`](https://github.com/clrozeboom/NerdSwerveYAGSL2026)'s
-  `claude/riobridge-can-fallback` branch -- a from-scratch `RioBridgeCan` rewrite using the older,
-  non-streaming, per-device `CAN`/`CANReceiveMessage` API instead of the stream session.
-  **Confirmed working on real hardware**: deployed to the same SystemCore, `malformedFrameCount`
-  stayed at 0 and previously-stuck-at-0 frame counts came back nonzero, across many consecutive
-  one-second windows. The payload-marshaling gap is specific to the stream session API -- this
-  per-device API doesn't share it. Trades away per-sample buffering to get there (see that
-  branch's `RioBridgeCan`/`DiagnosticsRobot` class javadoc for what that costs and why it's free
-  for this particular project).
+send rates are fixed by the protocol table and ADR-0004's explicit-sends design.
 
 ## 4. Encoder channels: onboard vs. MXP
 
@@ -269,7 +277,7 @@ stay flat/noisy throughout.
 **When done:** revert `Main.java` to `RobotBase.startRobot(Robot::new)` and redeploy the real
 `Robot` before leaving the bench.
 
-## 5. Core toolchain / vendor library build compatibility at alpha-7
+## 5. Core toolchain / vendor library build compatibility
 
 **Updated after actually cloning the real Core project.** [`clrozeboom/BobCat-SystemCore-Clone`](https://github.com/clrozeboom/BobCat-SystemCore-Clone)
 turned out not to contain AdvantageKit or REV SPARK MAX at all -- it's mostly a Raspberry Pi
@@ -292,19 +300,21 @@ you're checking Phoenix6 instead, its native driver may or may not have the equi
 that's what step 3 below actually tests. A weekly Routine watches for a REVLib-driver release
 that fixes this.
 
-**Staying on WPILib alpha-6 instead of bumping to alpha-7 is possible, RioBridge included.**
-`core-example-rev/README.md`'s "Using WPILib alpha-6 instead" section has the mechanics (a
-year-frozen `release-2027` frcmaven repo still serves alpha-4 through alpha-6 in full, and
-reproduced the exact same REVLib failure there too -- ruling out an alpha-7-specific cause) and
-the corrected multi-bus story: alpha-6's friendly `CAN`/`CANPort` API genuinely has no
-bus-selecting option, but `core-integration/`'s design never used that API -- it calls
-`CANJNI.openCANStreamSession` directly, which already takes a raw HAL bus id (`int`) at alpha-6,
-same as alpha-7, just without `CANPort`'s enum wrapper around it
+**This repo settled on WPILib alpha-6, RioBridge included -- staying there was never actually
+blocked the way an earlier detour to alpha-7 assumed.** `core-example-rev/README.md`'s "Using
+WPILib alpha-6 instead" section has the mechanics (a year-frozen `release-2027` frcmaven repo
+still serves alpha-4 through alpha-6 in full, and reproduced the exact same REVLib failure there
+too -- ruling out an alpha-7-specific cause) and the corrected multi-bus story: alpha-6's friendly
+`CAN`/`CANPort` API genuinely has no bus-selecting option via `CANPort` specifically (`CANPort`
+doesn't exist yet at alpha-6), but `core-integration/`'s per-device `CAN` class takes a raw HAL bus
+id (`int`) as its first constructor parameter directly, same as `CANJNI.openCANStreamSession` did
+at either alpha -- just without `CANPort`'s enum wrapper around it
 (`org.wpilib.hardware.hal.CANBusMap` has the same values as plain ints). Confirmed by actually
-applying this repo's design to a real alpha-6 project, not just decompiling -- see that section.
-This repo still targets alpha-7 since there's no reason to prefer the older one once the REVLib
-gap turned out to be version-independent, but alpha-6 was never actually the blocker it was first
-reported as.
+applying this repo's design to a real alpha-6 project, not just decompiling -- see that section,
+and the root README's "Hardware this was designed against" for why alpha-6 (not alpha-7) is now
+this repo's stated target: alpha-6 is what's actually confirmed end-to-end on real hardware, and
+neither REV's nor CTRE's vendor libraries had shipped for alpha-7 anyway, so there was never a
+compatibility reason to prefer the newer one.
 
 **Steps, for whatever vendor library and framework your Core project actually uses:**
 
@@ -312,11 +322,13 @@ reported as.
    `ctre-commands-v3` if you have no other yet).
 2. Check what's actually pinned: the `org.wpilib.GradleRIO` plugin version in `build.gradle`, and
    each vendor library's version in `vendordeps/*.json`.
-3. Bump the WPILib/GradleRIO version to `2027.0.0-alpha-7` (or whatever is current -- confirm on
-   frcmaven, since old 2027 alphas get overwritten there rather than retained) and try
-   `./gradlew build`. Expect real compile errors if your code touches anything in
-   `core-example-rev/README.md`'s table; fix those first so a subsequent failure is actually about
-   vendor library compatibility, not leftover alpha-6 API usage.
+3. If you're checking compatibility with a WPILib version other than what's currently pinned,
+   bump the WPILib/GradleRIO version (confirm what's current on frcmaven, since old 2027 alphas
+   get overwritten in the normal `release` repo rather than retained -- `release-2027` keeps
+   alpha-4 through alpha-6 regardless, see above) and try `./gradlew build`. Expect real compile
+   errors if your code touches anything in `core-example-rev/README.md`'s alpha-6-vs-alpha-7 API
+   differences table; fix those first so a subsequent failure is actually about vendor library
+   compatibility, not a version-specific API change.
 4. If a vendor library's own classes fail to resolve or compile, check its release notes for
    which WPILib alpha it expects -- look for a newer vendor release before assuming the RioBridge
    integration code is at fault, since neither `core-integration/` nor `core-example-rev/` has any
