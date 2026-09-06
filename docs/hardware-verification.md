@@ -233,12 +233,31 @@ send rates are fixed by the protocol table and ADR-0004's explicit-sends design.
 
 ## 4. Encoder channels: onboard vs. MXP
 
-**What/why:** `rio-bridge/`'s `Robot.java` currently assumes all four absolute encoders are on
-onboard analog channels 0-3 (there's a `TODO` at that exact line). If any are actually wired to
-the MXP breakout instead, that assumption is wrong and the wrong physical encoder ends up in each
-CAN frame slot.
+**Resolved, on real hardware, and confirmed at the per-module level, not just onboard-vs-MXP in
+the abstract.** `rio-bridge/`'s `Robot.java` used to just assume all four absolute encoders are on
+onboard analog channels 0-3 (there was a `TODO` at that exact line). A real
+`EncoderChannelDiagnostic` run, rotating each swerve module's encoder by hand in a known order
+(FL, FR, BR, BL), confirmed:
+
+- Each rotation produced exactly one onboard channel's smooth, large sweep, in this order:
+  `onboard[0]` (FL), `onboard[1]` (FR), `onboard[3]` (BR), `onboard[2]` (BL).
+- That's not just "all four on onboard, none on MXP" -- it's the *specific* channel assignment
+  `NerdSwerveYAGSL2026`'s `Constants.java` assumes (`FRONT_LEFT`=0, `FRONT_RIGHT`=1, `BACK_LEFT`=2,
+  `BACK_RIGHT`=3), confirmed to actually match, not just presumed to.
+
+**A separate, non-blocking finding from the same run: real analog crosstalk.** While `onboard[3]`
+(BACK_RIGHT) was sweeping, `MXP[4]` moved too -- proportionally, same direction, about 29% of
+`onboard[3]`'s swing; `MXP[5]` moved more weakly (~8%); `MXP[6]` weaker still; `MXP[7]` stayed flat.
+That falling-off-with-distance pattern (closest MXP channel most affected, farthest unaffected) is
+consistent with capacitive crosstalk from an actively-driven, high-impedance encoder signal onto
+adjacent floating channels -- not a wiring error, and not something that changes the channel
+assignment above. Worth keeping in mind if a future addition to this project ever wires something
+electrically sensitive to `MXP[4]`-`MXP[6]`, since it would pick up an echo of whatever's on
+`onboard[3]`.
 
 **Tool:** [`EncoderChannelDiagnostic`](../rio-bridge/src/main/java/frc/robot/diagnostics/EncoderChannelDiagnostic.java).
+The steps below are kept as a runbook for re-verifying on different hardware (a different
+harness/wiring run could plausibly differ), not because the answer is still open.
 
 **Steps:**
 
@@ -266,8 +285,13 @@ CAN frame slot.
    value tracks it smoothly. A floating (unwired) analog channel reads noisy near one rail (0 or
    4095), not a stable value that moves with the encoder.
 
-**Pass criteria:** all four encoders show up on `onboard[0]`-`onboard[3]`, and `MXP[4]`-`MXP[7]`
-stay flat/noisy throughout.
+**Pass criteria:** each of the four encoders' *primary* signal -- the smooth, large sweep as you
+rotate it -- shows up on a distinct `onboard[0]`-`onboard[3]` channel. `MXP[4]`-`MXP[7]` should
+stay flat/noisy for three of the four rotations; a real run found one exception (see the
+crosstalk finding above): rotating whichever encoder lands on `onboard[3]` can produce a smaller,
+secondary echo on `MXP[4]`-`MXP[6]` that fades with distance. That's fine and doesn't fail this
+check -- what would fail it is an *MXP* channel showing the primary, full-amplitude sweep instead
+of an onboard one.
 
 **If an encoder shows up on an MXP channel instead:** update `ENCODER_CHANNELS` in
 `rio-bridge/src/main/java/frc/robot/Robot.java` to the real channel numbers (0-7, matching

@@ -177,8 +177,14 @@ are in [docs/hardware-verification.md](docs/hardware-verification.md).
    stayed at 0 (trivially — there's nothing left to overflow) and bus counters showed no
    regression across a real autonomous+teleop run. See `RioBridgeCan`'s class javadoc and
    [docs/hardware-verification.md](docs/hardware-verification.md) item 3.
-4. All four encoders are on onboard analog channels, none on MXP analog. `rio-bridge/`'s encoder
-   channel list has a `TODO` at this exact point.
+4. ~~All four encoders are on onboard analog channels, none on MXP analog~~ — **resolved**: a
+   real `EncoderChannelDiagnostic` run rotated each module's encoder in a known order (FL, FR,
+   BR, BL) and confirmed each one's smooth, large sweep landed on a distinct onboard channel
+   (0, 1, 3, 2 respectively) — exactly matching `NerdSwerveYAGSL2026`'s `Constants.java`
+   (`FRONT_LEFT`=0, `FRONT_RIGHT`=1, `BACK_LEFT`=2, `BACK_RIGHT`=3), not just "onboard vs MXP" in
+   the abstract. None of the four showed up on an MXP channel as their primary signal. See
+   [docs/hardware-verification.md](docs/hardware-verification.md) item 4, including a separate,
+   non-blocking analog crosstalk artifact that run also turned up.
 5. ~~AdvantageKit alpha-4 builds against WPILib alpha-6~~ — **resolved**: this repo briefly moved
    its stated Core target to alpha-7 on the mistaken assumption that alpha-6 was no longer
    resolvable from frcmaven at all (see the "Hardware this was designed against" section's "brief
