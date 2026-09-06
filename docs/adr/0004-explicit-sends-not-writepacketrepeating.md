@@ -9,7 +9,9 @@ that the arrival of a frame is itself evidence that the loop ran and the sensor 
 
 ## Consequences
 
-Frame timing inherits the RioBridge loop's jitter, which is acceptable because
-`CANStreamMessage` timestamps each frame on arrival at the Core. It also removes the need for a
-per-frame sequence counter — a dropped frame shows as a doubled interval between timestamps —
-which is what lets the fast frames use all 8 data bytes.
+Frame timing inherits the RioBridge loop's jitter, which is acceptable because the Core timestamps
+each frame on arrival (`CANReceiveMessage.timestamp`, or `CANStreamMessage.timestamp` for the
+buffered stream session an earlier design used — see core-integration/README.md for which API the
+Core side reads through now). It also removes the need for a per-frame sequence counter — a
+dropped frame shows as a doubled interval between timestamps — which is what lets the fast frames
+use all 8 data bytes.

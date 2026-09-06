@@ -1,0 +1,52 @@
+{
+    "fileName": "REVLib.json",
+    "name": "REVLib",
+    "version": "2027.0.0-alpha-6",
+    "wpilibYear": "2027_alpha7",
+    "uuid": "a5cc8a94-4d0f-4a10-b5f2-6ba7e2c6a6f1",
+    "mavenUrls": [
+        "https://maven.revrobotics.com/"
+    ],
+    "jsonUrl": "",
+    "javaDependencies": [
+        {
+            "groupId": "com.revrobotics.frc",
+            "artifactId": "REVLib-java",
+            "version": "2027.0.0-alpha-6"
+        }
+    ],
+    "jniDependencies": [
+        {
+            "groupId": "com.revrobotics.frc",
+            "artifactId": "REVLib-driver",
+            "version": "2027.0.0-alpha-6",
+            "isJar": false,
+            "skipInvalidPlatforms": true,
+            "validPlatforms": [
+                "windowsx86-64",
+                "linuxx86-64",
+                "linuxarm64",
+                "linuxsystemcore",
+                "osxuniversal"
+            ]
+        }
+    ],
+    "cppDependencies": [
+        {
+            "groupId": "com.revrobotics.frc",
+            "artifactId": "REVLib-cpp",
+            "version": "2027.0.0-alpha-6",
+            "libName": "REVLib",
+            "headerClassifier": "headers",
+            "sharedLibrary": false,
+            "skipInvalidPlatforms": true,
+            "binaryPlatforms": [
+                "windowsx86-64",
+                "linuxx86-64",
+                "linuxarm64",
+                "linuxsystemcore",
+                "osxuniversal"
+            ]
+        }
+    ]
+}
