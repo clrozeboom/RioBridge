@@ -33,8 +33,15 @@ public class Robot extends TimedRobot {
   private static final double LOOP_PERIOD_SECONDS = 1.0 / CanIds.ENCODERS_HZ;
   private static final int STATUS_LOOP_DIVIDER = CanIds.ENCODERS_HZ / CanIds.STATUS_HZ;
 
-  // TODO (README "To verify" #4): confirm all four absolute encoders are on onboard analog
-  // channels 0-3 and none are on the MXP analog channels, then correct this if not.
+  // README "To verify" #4: resolved. A real EncoderChannelDiagnostic run confirmed all four
+  // absolute encoders are on onboard analog channels 0-3 (none on MXP), in exactly the order
+  // NerdSwerveYAGSL2026's Constants.java assumes (FRONT_LEFT=0, FRONT_RIGHT=1, BACK_LEFT=2,
+  // BACK_RIGHT=3) -- confirmed by rotating each module's encoder in a known order (FL, FR, BR,
+  // BL) and matching each rotation to the one onboard channel that moved. See
+  // docs/hardware-verification.md item 4 for the raw data, including a real (and separate,
+  // non-blocking) analog crosstalk artifact it also turned up: rotating the BACK_RIGHT encoder
+  // (onboard[3]) also produces a smaller, falling-off-with-distance echo on MXP[4]/[5]/[6] --
+  // consistent with capacitive crosstalk from an adjacent floating channel, not a wiring error.
   private static final int[] ENCODER_CHANNELS = {0, 1, 2, 3};
 
   private final CAN can = new CAN(CanIds.DEVICE_NUMBER);
